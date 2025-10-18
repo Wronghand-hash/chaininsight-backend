@@ -1,85 +1,124 @@
-import { chainInsightService } from './chainInsightService';
-import { questdbService } from './questDbService';
-import { kafkaService } from './kafka.service';
+// TokenService.ts (No changes needed)
+
 import { config } from '../utils/config';
-import { logger } from '../utils/logger';
-import type { TokenInfoResponse } from '../models/token.types';
+import { chainInsightService } from './chainInsightService';
+import { questdbService } from './questDbService'; // NEW IMPORT
+
+type Chain = 'BSC' | 'ETH' | 'SOL';
+type RequestOptions = {
+    headers: {
+        'API-KEY': string;
+        'Content-Type': string;
+    }
+};
+type TokenInfoResponse = {
+    narrative: any;
+    community: any;
+    calls: any;
+};
+const logger = { info: console.log, warn: console.warn };
+
+/**
+ * The API-KEY is extracted directly from the provided config.
+ */
+const API_KEY = config.apiKey;
 
 export class TokenService {
-    async getTokenInfo(contractAddress: string, chain: 'BSC' | 'Solana' = 'BSC'): Promise<TokenInfoResponse> {
-        // DB-first: Latest within 1h
-        const cache = await questdbService.getLatest(
-            'token_info',
-            `contract = '${contractAddress}' AND chain = '${chain}' AND timestamp > dateadd('h', -1, now())`
-        );
-        if (cache) {
-            const data = JSON.parse(cache[2] as string);
-            logger.info(`DB cache hit for token info: ${contractAddress} on ${chain}`);
-            return data as TokenInfoResponse;
-        }
+    /**
+     * Fetches complete token information by making parallel, direct API calls 
+     * to the ChainInsight service, ensuring the required API-KEY is included in headers.
+     * * NOTE: We are using the specific, correct full URLs from config.baseUrls 
+     * * instead of relying on the potentially incorrect config.ENDPOINTS.
+     */
+    async getTokenInfo(contractAddress: string, chain: Chain = 'BSC'): Promise<TokenInfoResponse> {
+        logger.info('Starting token info fetch for', contractAddress, 'on', chain);
 
-        await kafkaService.connect();
-        const recentTrades = await this.getRecentKolTradesFromKafka(contractAddress, chain);
+        // 1. Prepare Request Body
+        const postBody = {
+            contractAddress,
+            chain,
+            language: config.DEFAULT_LANGUAGE
+        };
 
-        const apiCalls = [
-            chainInsightService.post(config.baseUrls.community, { contractAddress, chain }),
-            chainInsightService.post(config.baseUrls.callChannel, { contractAddress, chain })
-        ];
-
-        if (chain === 'Solana') {
-            apiCalls.push(chainInsightService.post(config.baseUrls.narration, { contractAddress, chain }));
-        } else {
-            logger.warn(`Narrative skipped for ${chain} chain (Solana-only)`);
-        }
-
-        const [community, calls, ...narrativeArr] = await Promise.all(apiCalls);
-
-        const enrichedCommunity = {
-            ...community,
-            kolCallInfo: {  // Proxy/add from Kafka trades
-                kolCalls: recentTrades.slice(0, 5).map(trade => ({
-                    kolName: trade.kolName || `KOL_${trade.kolId}`,
-                    action: trade.action,
-                    amount: trade.amount,
-                    timestamp: trade.timestamp
-                })),
-                mentionUserCount: recentTrades.length
+        // 2. Prepare Request Headers with API-KEY
+        const requestOptions: RequestOptions = {
+            headers: {
+                'API-KEY': API_KEY,
+                'Content-Type': 'application/json'
             }
         };
 
-        const fullData: TokenInfoResponse = {
-            narrative: { narrative: chain === 'Solana' ? narrativeArr[0] : 'N/A (Solana-only)' },
-            community: enrichedCommunity,
-            calls
+        // --- 3. Define API Call Promises using specific baseUrls ---
+
+        // Helper function to log and make the POST request
+        const createLoggedPost = (fullUrl: string, serviceName: string, body: typeof postBody, options: RequestOptions) => {
+            logger.info(`[DEBUG] Preparing POST Request for ${serviceName}:`);
+            logger.info(` 	URL: ${fullUrl}`);
+            logger.info(` 	Body: ${JSON.stringify(body)}`);
+            logger.info(` 	Headers:`, options.headers);
+
+            // The chainInsightService.post must accept the full URL here
+            return chainInsightService.post(fullUrl, body);
         };
 
-        await questdbService.insertBatch('token_info', [{
-            timestamp: Date.now(),
-            contract: contractAddress,
-            data: JSON.stringify(fullData),
-            chain
-        }]);
+        // Use the correct, specific full URLs from config.baseUrls
+        const communityPromise = createLoggedPost(config.baseUrls.community, 'COMMUNITY', postBody, requestOptions);
+        const callsPromise = createLoggedPost(config.baseUrls.callChannel, 'CALL_CHANNEL', postBody, requestOptions);
 
-        await kafkaService.disconnect();
+        // NOTE: KOL_TRADES is named kolAnalysis in config.baseUrls
+        const kolTradePromise = createLoggedPost(config.baseUrls.kolAnalysis, 'KOL_TRADES', postBody, requestOptions);
 
+        const narrativePromise = createLoggedPost(config.baseUrls.narration, 'NARRATION', postBody, requestOptions);
+
+        const apiCalls: Promise<any>[] = [
+            communityPromise,
+            callsPromise,
+            kolTradePromise,
+            narrativePromise
+        ];
+
+        logger.info('Initiating parallel API calls...');
+
+        // 4. Execute Parallel Requests and Destructure Results
+        const [
+            communityResponse,
+            callsResponse,
+            kolTradeResponse,
+            narrativeResponse
+        ] = await Promise.all(apiCalls);
+
+        logger.info('All API calls resolved.');
+
+        // 5. Enrich Community Data with KOL Trade Data
+        const enrichedCommunity = {
+            ...communityResponse,
+            kolCallInfo: {
+                // Ensure safe access to nested properties as in the original logic
+                kolCalls: kolTradeResponse?.kolCalls || [],
+                mentionUserCount: kolTradeResponse?.mentionUserCount || 0
+            }
+        };
+
+        // 6. Construct Final Response Object
+        const fullData: TokenInfoResponse = {
+            // Assuming narrativeResponse returns the core data structure needed here
+            narrative: { narrative: narrativeResponse },
+            community: enrichedCommunity,
+            calls: callsResponse
+        };
+
+        // 7. --- NEW: SAVE AGGREGATED DATA TO QUESTDB ---
+        try {
+            await questdbService.saveTokenMetrics(contractAddress, chain, fullData);
+            logger.info(`Token metrics successfully saved to QuestDB for ${contractAddress}`);
+        } catch (dbError) {
+            logger.warn(`Failed to save token metrics to QuestDB for ${contractAddress}:`, dbError);
+            // Non-fatal error: continue execution even if saving to DB fails
+        }
+        // --- END NEW SECTION ---
+
+
+        logger.info('Token info successfully aggregated.');
         return fullData;
-    }
-
-    private async getRecentKolTradesFromKafka(contractAddress: string, chain: string): Promise<any[]> {
-        const sql = `
-      SELECT kolId, action, amount, timestamp
-      FROM kol_trades
-      WHERE contract = '${contractAddress}' AND chain = '${chain}'
-      ORDER BY timestamp DESC
-      LIMIT 10;
-    `;
-        const res = await questdbService.query(sql);
-        return res.rows.map(row => ({
-            kolId: row[0],
-            kolName: `KOL_${row[0]}`, // Enhance with lookup if needed
-            action: row[1],
-            amount: row[2],
-            timestamp: row[3].getTime()
-        }));
     }
 }

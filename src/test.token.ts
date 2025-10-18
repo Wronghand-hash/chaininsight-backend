@@ -13,23 +13,28 @@ dotenv.config({ path: path.join(rootDir, '.env') });
 // Local imports (relative to src/)
 import { questdbService } from './services/questDbService';
 import { KolService } from './services/kolsLeaderboard';
+import { TokenService } from './services/tokenService';
 // Removed: import { SecurityService } from './services/securityService';
 // Removed: import { PriceService } from './services/tokenPriceService';
 
 async function testTokenInfo() {
     const kolService = new KolService();
-    const contractAddress = '0x5769f43db2a4aeA2671af9079D07f1d0c6844444'; // USDT on BSC
-    const chain = 'Bsc';
+    const contractAddress = '0x0A43fC31a73013089DF59194872Ecae4cAe14444'; // USDT on BSC
+    const chain = 'BSC';
 
     console.log(`\n--- Testing Token Leaderboard for ${chain} token: ${contractAddress} ---\n`);
 
     try {
-        // ASSUMPTION: TokenService has a method named getLeaderboards
-        // which takes contractAddress and chain.
-        const leaderboard = await kolService.getLeaderboards(contractAddress, "BSC");
 
-        console.log('✅ Token Leaderboard Test Successful');
-        console.log('Leaderboard Result:', JSON.stringify(leaderboard, null, 2));
+        //tokenServiceTest
+        await questdbService.init();
+        const tokenService = new TokenService();
+        const tokenInfo = await tokenService.getTokenInfo(contractAddress, chain);
+        console.log('✅ Token Info Test Successful');
+        console.log('Token Info:', JSON.stringify(tokenInfo, null, 2));
+
+        // console.log('✅ Token Leaderboard Test Successful');
+        // console.log('Leaderboard Result:', JSON.stringify(leaderboard, null, 2));
 
     } catch (error: any) {
         console.error('❌ Test failed:', error);
