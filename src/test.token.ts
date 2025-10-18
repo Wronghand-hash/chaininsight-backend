@@ -18,7 +18,7 @@ import { KolService } from './services/kolsLeaderboard';
 
 async function testTokenInfo() {
     const kolService = new KolService();
-    const contractAddress = '0x6a0A9D927eBdC6e58d09D7D3C5B351b0E47b4444'; // USDT on BSC
+    const contractAddress = '0x5769f43db2a4aeA2671af9079D07f1d0c6844444'; // USDT on BSC
     const chain = 'Bsc';
 
     console.log(`\n--- Testing Token Leaderboard for ${chain} token: ${contractAddress} ---\n`);
