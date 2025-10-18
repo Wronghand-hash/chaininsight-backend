@@ -1,7 +1,6 @@
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
-import { stringify } from 'querystring';
 
 const kafka = new Kafka({
     clientId: 'chaininsight-consumer',
@@ -42,28 +41,66 @@ export class KafkaService {
                     console.log(JSON.stringify(tradeData, null, 2));
                     console.log('=== END KAFKA DATA ===\n');
 
-                    // Process each item in data array (batches possible)
+                    // Process each item in data array (batches)
                     for (const trade of tradeData.data || []) {
-                        // Ensure required fields (defaults as strings/numbers)
-                        const kolId = trade.kol?.id || 0;
+                        // FIXED: Timestamp as integer seconds (floor ms to s for TIMESTAMP)
+                        const timestamp = Math.floor(Number(trade.createTime || Date.now()) / 1000);
+
+                        // Parse amount with units (e.g., "3.89M" → 3890000)
+                        const parseAmount = (str: string): number => {
+                            if (!str || typeof str !== 'string') return 0;
+                            let num = parseFloat(str.replace(/[^\d.]/g, ''));  // Strip letters/units
+                            if (str.toUpperCase().includes('M')) num *= 1e6;
+                            else if (str.toUpperCase().includes('K')) num *= 1e3;
+                            return num;
+                        };
+
+                        // Ensure required fields
+                        const kolId = String(trade.kol?.id || '');
+                        const kolName = String(trade.kol?.name || '');
+                        const kolAvatar = String(trade.kol?.avatar || '');
+                        const kolTwitterId = String(trade.kol?.twitterId || '');
                         const action = trade.actionType ? ['default', 'buy', 'add', 'partial_sell', 'full_sell'][trade.actionType] || 'unknown' : 'unknown';
-                        const amount = Number(trade.toTokenCount || trade.toToken?.count || 0);
-                        const contract = String(trade.toTokenAddress || trade.toToken?.address || '');
-                        const timestamp = Number(trade.createTime || Date.now());
+                        const amount = parseAmount(trade.toTokenCount || '0');
+                        const contract = String(trade.toTokenAddress || '');
                         const chain = String(trade.chainName || 'BSC');
+                        const usdtPrice = Number(trade.usdtPrice || 0);
+                        const txHash = String(trade.transactionHash || '');
+                        const fromToken = String(trade.fromToken || '');
+                        const fromTokenAddress = String(trade.fromTokenAddress || '');
+                        const fromTokenCount = parseAmount(trade.fromTokenCount || '0');
+                        const toToken = String(trade.toToken || '');
+                        const toTokenAddress = String(trade.toTokenAddress || '');
+                        const toTokenRemainCount = parseAmount(trade.toTokenRemainCount || '0');
+                        const walletType = Number(trade.walletType || 0);
+                        const recentBuyerKols = JSON.stringify(trade.recentBuyerKols || []);
+                        const recentSellerKols = JSON.stringify(trade.recentSellerKols || []);
 
-                        logger.info(`Kafka KOL trade push: KOL_${kolId} ${action} ${amount} of ${contract}`);
+                        logger.info(`Kafka KOL trade push: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT)`);
 
-                        // Single-row insert + immediate flush per trade (clears buffer for next)
-                        const insertData = [{
+                        // Single-row insert for full data (timestamp as integer seconds)
+                        await questdbService.insertBatch('kol_trades', [{
                             timestamp,
-                            kolId: String(kolId),
+                            kolId,
+                            kolName,
+                            kolAvatar,
+                            kolTwitterId,
                             contract,
                             action,
                             amount,
+                            usdtPrice,
+                            txHash,
+                            fromToken,
+                            fromTokenAddress,
+                            fromTokenCount,
+                            toToken,
+                            toTokenAddress,
+                            toTokenRemainCount,
+                            walletType,
+                            recentBuyerKols,
+                            recentSellerKols,
                             chain
-                        }];
-                        await questdbService.insertBatch('kol_trades', insertData);
+                        }]);
                     }
                 } catch (error) {
                     logger.error(`Kafka message processing failed (offset ${message.offset}):`, error);

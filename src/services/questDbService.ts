@@ -51,7 +51,29 @@ export class QuestDBService {
       },
       {
         name: 'kol_trades',
-        create: `CREATE TABLE IF NOT EXISTS kol_trades (timestamp TIMESTAMP, kolId STRING, contract SYMBOL, action SYMBOL, amount DOUBLE, chain SYMBOL) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
+        create: `CREATE TABLE IF NOT EXISTS kol_trades (
+          timestamp TIMESTAMP,
+          kolId STRING,
+          kolName STRING,
+          kolAvatar STRING,
+          kolTwitterId STRING,
+          contract SYMBOL,
+          action SYMBOL,
+          amount DOUBLE,
+          usdtPrice DOUBLE,
+          txHash SYMBOL,
+          fromToken STRING,
+          fromTokenAddress SYMBOL,
+          fromTokenCount DOUBLE,
+          toToken STRING,
+          toTokenAddress SYMBOL,
+          toTokenCount DOUBLE,
+          toTokenRemainCount DOUBLE,
+          walletType INT,
+          recentBuyerKols STRING,
+          recentSellerKols STRING,
+          chain SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
       },
       {
         name: 'token_info',
@@ -75,14 +97,59 @@ export class QuestDBService {
   }
 
   // FIXED: Parameterized PG INSERT (single per row for safety; no SQL escaping issues)
-  async insertBatch(table: string, rows: Array<Record<string, string | number>>): Promise<void> {
+  async insertBatch(table: string, rows: Array<Record<string, any>>): Promise<void> {
     if (rows.length === 0) return;
 
     try {
       for (const row of rows) {
-        // Parameterized INSERT per row (avoids comma/escaping errors in multi-row)
-        const sql = `INSERT INTO ${table} (timestamp, kolId, contract, action, amount, chain) VALUES ($1, $2, $3, $4, $5, $6);`;
-        const values = [row.timestamp, String(row.kolId || 0), String(row.contract || ''), String(row.action || 'unknown'), Number(row.amount || 0), String(row.chain || 'BSC')];
+        let sql: string;
+        let values: any[];
+        switch (table) {
+          case 'kol_trades':
+            sql = `INSERT INTO ${table} (
+              timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, txHash,
+              fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
+              walletType, recentBuyerKols, recentSellerKols, chain
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21);`;
+            values = [
+              row.timestamp,
+              String(row.kolId || ''),
+              String(row.kolName || ''),
+              String(row.kolAvatar || ''),
+              String(row.kolTwitterId || ''),
+              String(row.contract || ''),
+              String(row.action || 'unknown'),
+              Number(row.amount || 0),
+              Number(row.usdtPrice || 0),
+              String(row.txHash || ''),
+              String(row.fromToken || ''),
+              String(row.fromTokenAddress || ''),
+              Number(row.fromTokenCount || 0),
+              String(row.toToken || ''),
+              String(row.toTokenAddress || ''),
+              Number(row.toTokenCount || 0),
+              Number(row.toTokenRemainCount || 0),
+              Number(row.walletType || 0),
+              JSON.stringify(row.recentBuyerKols || []),  // Array as JSON string
+              JSON.stringify(row.recentSellerKols || []),  // Array as JSON string
+              String(row.chain || 'BSC')
+            ];
+            break;
+          case 'prices':
+            sql = `INSERT INTO ${table} (timestamp, contract, priceUsd, volume, chain) VALUES ($1, $2, $3, $4, $5);`;
+            values = [row.timestamp, String(row.contract), Number(row.priceUsd), Number(row.volume), String(row.chain)];
+            break;
+          case 'token_info':
+            sql = `INSERT INTO ${table} (timestamp, contract, data, chain) VALUES ($1, $2, $3, $4);`;
+            values = [row.timestamp, String(row.contract), String(row.data), String(row.chain)];
+            break;
+          case 'security_labels':
+            sql = `INSERT INTO ${table} (timestamp, address, data, chain) VALUES ($1, $2, $3, $4);`;
+            values = [row.timestamp, String(row.address), String(row.data), String(row.chain)];
+            break;
+          default:
+            throw new Error(`Unsupported table: ${table}`);
+        }
 
         await this.pgClient.query({ text: sql, values, rowMode: 'array' });
       }
