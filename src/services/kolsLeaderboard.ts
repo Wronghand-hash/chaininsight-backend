@@ -2,8 +2,8 @@ import { chainInsightService } from './chainInsightService';
 import { questdbService } from './questDbService';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import type { KolLeaderboardResponse } from '../models/kols.types';
 import type { QueryResult } from '../models/db.types';
-import { KolLeaderboardResponse } from '../models/kols.types'
 
 export class KolService {
     async getLeaderboards(contractAddress: string, chain: 'Solana' = 'Solana'): Promise<KolLeaderboardResponse> {

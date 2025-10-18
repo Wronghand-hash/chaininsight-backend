@@ -10,7 +10,7 @@ export class QuestDBService {
   private initialized = false;
 
   constructor() {
-    // PG client for queries/DDL (with auth)
+    // PG client for queries/inserts/DDL (with auth) - Use for all ops (stateless)
     this.pgClient = new Client({
       host: config.questdb.host,
       port: config.questdb.pgPort,
@@ -28,14 +28,14 @@ export class QuestDBService {
       // Test PG connection
       await this.pgClient.query({ text: 'SELECT 1 as ping;', rowMode: 'array' });
 
-      // Async init Sender
+      // Async init Sender (optional for bulk; use PG for now to avoid state issues)
       const tcpConfig = `tcp::addr=${config.questdb.host}:${config.questdb.fastPort};`;
       this.sender = await Sender.fromConfig(tcpConfig);
       await this.sender.connect();  // Optional: Explicit connect for health check
 
       await this.createTables();
       this.initialized = true;
-      logger.info('QuestDB initialized successfully (Sender + PG)');
+      logger.info('QuestDB initialized successfully (PG + Sender)');
     } catch (error) {
       logger.error('QuestDB initialization failed', error);
       throw error;
@@ -51,7 +51,7 @@ export class QuestDBService {
       },
       {
         name: 'kol_trades',
-        create: `CREATE TABLE IF NOT EXISTS kol_trades (timestamp TIMESTAMP, kolId LONG, contract SYMBOL, action SYMBOL, amount DOUBLE, chain SYMBOL) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
+        create: `CREATE TABLE IF NOT EXISTS kol_trades (timestamp TIMESTAMP, kolId STRING, contract SYMBOL, action SYMBOL, amount DOUBLE, chain SYMBOL) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
       },
       {
         name: 'token_info',
@@ -74,53 +74,21 @@ export class QuestDBService {
     logger.info('QuestDB tables created/verified');
   }
 
-  // Batch insert via Sender (await per row + flush)
+  // FIXED: Parameterized PG INSERT (single per row for safety; no SQL escaping issues)
   async insertBatch(table: string, rows: Array<Record<string, string | number>>): Promise<void> {
-    if (!this.sender || rows.length === 0) return;
+    if (rows.length === 0) return;
 
     try {
       for (const row of rows) {
-        const ts = row.timestamp as number;
-        const chain = row.chain as string;
-        let rowBuilder = this.sender.table(table).symbol('chain', chain);
+        // Parameterized INSERT per row (avoids comma/escaping errors in multi-row)
+        const sql = `INSERT INTO ${table} (timestamp, kolId, contract, action, amount, chain) VALUES ($1, $2, $3, $4, $5, $6);`;
+        const values = [row.timestamp, String(row.kolId || 0), String(row.contract || ''), String(row.action || 'unknown'), Number(row.amount || 0), String(row.chain || 'BSC')];
 
-        switch (table) {
-          case 'prices':
-            rowBuilder = rowBuilder
-              .symbol('contract', row.contract as string)
-              .floatColumn('priceUsd', row.priceUsd as number)
-              .floatColumn('volume', row.volume as number);
-            break;
-          case 'kol_trades':
-            rowBuilder = rowBuilder
-              .stringColumn('kolId', row.kolId as string)
-              .symbol('contract', row.contract as string)
-              .symbol('action', row.action as string)
-              .floatColumn('amount', row.amount as number);
-            break;
-          case 'token_info':
-            rowBuilder = rowBuilder
-              .symbol('contract', row.contract as string)
-              .stringColumn('data', row.data as string);
-            break;
-          case 'security_labels':
-            rowBuilder = rowBuilder
-              .symbol('address', row.address as string)
-              .stringColumn('data', row.data as string);
-            break;
-          default:
-            throw new Error(`Unsupported table: ${table}`);
-        }
-
-        // Await row finalization
-        await rowBuilder.at(ts, 'ms');
+        await this.pgClient.query({ text: sql, values, rowMode: 'array' });
       }
-
-      // Flush after all rows
-      await this.sender.flush();
-      logger.debug(`Inserted ${rows.length} rows into ${table}`);
+      logger.debug(`Inserted ${rows.length} rows into ${table} via parameterized PG`);
     } catch (error) {
-      logger.error(`Batch insert failed for ${table}`, error);
+      logger.error(`PG insert failed for ${table}`, error);
       throw error;
     }
   }

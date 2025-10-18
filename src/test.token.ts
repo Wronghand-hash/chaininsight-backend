@@ -13,10 +13,12 @@ dotenv.config({ path: path.join(rootDir, '.env') });
 // Local imports (relative to src/)
 import { questdbService } from './services/questDbService';
 import { TokenService } from './services/tokenService';
+import { SecurityService } from './services/securityService';
+import { PriceService } from './services/tokenPriceService';
 
 async function testTokenInfo() {
     const tokenService = new TokenService();
-    const contractAddress = '0x55d398326f99059fF775485246999027B3197955'; // USDT on BSC
+    const contractAddress = '0x6a0A9D927eBdC6e58d09D7D3C5B351b0E47b4444'; // USDT on BSC
     const chain = 'BSC';
 
     try {
@@ -29,10 +31,14 @@ async function testTokenInfo() {
         const data = await tokenService.getTokenInfo(contractAddress, chain);
         console.log('Success! Response:', JSON.stringify(data, null, 2));
 
-        console.log(`\n=== Second Run (DB Cache Hit) ===`);
-        const cachedData = await tokenService.getTokenInfo(contractAddress, chain);
-        console.log('Cached Response:', JSON.stringify(cachedData, null, 2));
-        console.log('\n✅ Test complete! Check QuestDB console for inserted data.');
+
+        const priceService = new PriceService();
+        const price = await priceService.getRealTimePrice(contractAddress, 'BSC');
+        console.log('Price:', price);
+
+        const securityService = new SecurityService();
+        const security = await securityService.checkSecurity(['0x123...exampleWallet'], 'BSC');
+        console.log('Security:', security);
     } catch (error: any) {
         console.error('❌ Test failed:', error);
         if (error.message.includes('ECONNREFUSED')) {

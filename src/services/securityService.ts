@@ -5,7 +5,7 @@ import { logger } from '../utils/logger';
 import type { SecurityCheckResponse } from '../models/security.types';
 
 export class SecurityService {
-    async checkSecurity(walletAddresses: string[], chain: 'Solana' = 'Solana'): Promise<SecurityCheckResponse> {
+    async checkSecurity(walletAddresses: string[], chain: 'Solana' | 'BSC' = 'Solana'): Promise<SecurityCheckResponse> {
         const cachedTags: any[] = [];
         const uncachedAddresses: string[] = [];
 

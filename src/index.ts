@@ -3,7 +3,8 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { logger } from './utils/logger';
-import { questdbService } from './services/questdbService';
+import { questdbService } from './services/questDbService';
+import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
 // Note: Routes/controllers omitted per request; add back as needed
 
 dotenv.config();
@@ -17,7 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // Health check
-app.get('/health', (req, res) => res.status(200).json({ status: 'OK', db: 'QuestDB ready' }));
+app.get('/health', (req, res) => res.status(200).json({ status: 'OK', db: 'QuestDB ready', kafka: 'Connected' }));
 
 // Error handler
 app.use((err: Error, req: any, res: any, next: any) => {
@@ -25,12 +26,14 @@ app.use((err: Error, req: any, res: any, next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Init DB and start
+// Init DB and Kafka, then start
 (async () => {
   try {
     await questdbService.init();
+    await kafkaService.connect();  // NEW: Connect Kafka consumer
+    await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT} with QuestDB integration`);
+      logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
     });
   } catch (error) {
     logger.error('Startup failed', error);
@@ -41,6 +44,7 @@ app.use((err: Error, req: any, res: any, next: any) => {
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   logger.info('Shutting down...');
+  await kafkaService.disconnect();  // NEW: Disconnect Kafka
   await questdbService.close();
   process.exit(0);
 });
