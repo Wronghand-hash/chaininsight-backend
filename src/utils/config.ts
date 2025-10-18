@@ -18,6 +18,7 @@ export const config = {
     kolAnalysis: 'https://memeradar.chaininsight.vip/api/v1/kol_analysis_by_token',
     community: 'https://memeradar.chaininsight.vip/api/v1/analyze_token_community_v2',
     callChannel: 'https://memeradar.chaininsight.vip/api/v1/analyze_token_call_channel',
+    dexscreener: 'https://api.dexscreener.com/latest/dex/tokens/',
 
     // CabalSpy Base URL
     cabalSpy: process.env.CABALSPY_BASE_URL || 'https://api.cabalspy.xyz/v1',

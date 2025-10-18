@@ -14,12 +14,13 @@ dotenv.config({ path: path.join(rootDir, '.env') });
 import { questdbService } from './services/questDbService';
 import { KolService } from './services/kolsLeaderboard';
 import { TokenService } from './services/tokenService';
+import { tokenInfoApiService } from './api/services/tokenInfo.service';
 // Removed: import { SecurityService } from './services/securityService';
 // Removed: import { PriceService } from './services/tokenPriceService';
 
 async function testTokenInfo() {
     const kolService = new KolService();
-    const contractAddress = '0x0A43fC31a73013089DF59194872Ecae4cAe14444'; // USDT on BSC
+    const contractAddress = '0xc160598F2f5b216b48FA36007b4538114A234444'; // USDT on BSC
     const chain = 'BSC';
 
     console.log(`\n--- Testing Token Leaderboard for ${chain} token: ${contractAddress} ---\n`);
@@ -28,10 +29,8 @@ async function testTokenInfo() {
 
         //tokenServiceTest
         await questdbService.init();
-        const tokenService = new TokenService();
-        const tokenInfo = await tokenService.getTokenInfo(contractAddress, chain);
-        console.log('✅ Token Info Test Successful');
-        console.log('Token Info:', JSON.stringify(tokenInfo, null, 2));
+        const tokenApiService = tokenInfoApiService;
+        await tokenApiService.getTokenInfo(contractAddress);
 
         // console.log('✅ Token Leaderboard Test Successful');
         // console.log('Leaderboard Result:', JSON.stringify(leaderboard, null, 2));

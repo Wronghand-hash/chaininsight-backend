@@ -102,7 +102,7 @@ export class TokenService {
         // 6. Construct Final Response Object
         const fullData: TokenInfoResponse = {
             // Assuming narrativeResponse returns the core data structure needed here
-            narrative: { narrative: narrativeResponse },
+            narrative: { ...narrativeResponse },
             community: enrichedCommunity,
             calls: callsResponse
         };

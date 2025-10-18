@@ -27,9 +27,8 @@ export interface TokenInfoResponse {
 
 export interface PriceResponse {
   priceUsd: string;
-  priceChange: number;
   volume: number;
-  timestamp: number;
+  marketCap: number;
 }
 
 export interface HistoricalPrice extends Omit<PriceResponse, 'priceChange'> {
