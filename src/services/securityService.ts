@@ -9,7 +9,6 @@ export class SecurityService {
         const cachedTags: any[] = [];
         const uncachedAddresses: string[] = [];
 
-        // Check cache per address (24h TTL)
         for (const addr of walletAddresses) {
             const cache = await questdbService.getLatest(
                 'security_labels',
@@ -27,7 +26,6 @@ export class SecurityService {
             const data = { chain, walletAddresses: uncachedAddresses };
             apiData = await chainInsightService.post(config.baseUrls.walletTags, data) as SecurityCheckResponse;
 
-            // Insert uncached
             const inserts = apiData.walletTags.map(tag => ({
                 timestamp: Date.now(),
                 address: tag.address,
@@ -39,7 +37,6 @@ export class SecurityService {
             }
         }
 
-        // Merge
         const finalTags = uncachedAddresses.length > 0
             ? [...cachedTags, ...apiData!.walletTags]
             : cachedTags;

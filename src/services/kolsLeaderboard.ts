@@ -7,7 +7,6 @@ import type { QueryResult } from '../models/db.types';
 
 export class KolService {
     async getLeaderboards(contractAddress: string, chain: 'Solana' = 'Solana'): Promise<KolLeaderboardResponse> {
-        // DB-first: Aggregate from kol_trades
         const sql = `
       SELECT kolId, action, COUNT(*) as count, SUM(amount) as totalAmount
       FROM kol_trades
@@ -32,13 +31,11 @@ export class KolService {
             };
         }
 
-        // Fallback to API
         const apiData = await chainInsightService.post(config.baseUrls.kolAnalysis, { contractAddress }) as KolLeaderboardResponse;
 
-        // Parse and insert trades to DB (assuming API structure)
         const trades: Array<Record<string, any>> = (apiData.tradeStatList || []).map(stat => ({
             timestamp: Date.now(),
-            kolId: parseInt(stat.kolName.replace(/[^0-9]/g, '') || '0'), // Extract ID from name
+            kolId: parseInt(stat.kolName.replace(/[^0-9]/g, '') || '0'),
             contract: contractAddress,
             action: stat.action,
             amount: stat.amount || 0,
@@ -51,7 +48,6 @@ export class KolService {
         return apiData;
     }
 
-    // Global leaderboards: Top KOLs by buy count
     async getGlobalLeaderboards(chain: string, limit: number = 50): Promise<KolLeaderboardResponse[]> {
         const sql = `
       SELECT kolId, COUNT(*) as buys, SUM(amount) as totalBuys

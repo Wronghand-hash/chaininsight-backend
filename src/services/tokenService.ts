@@ -1,6 +1,6 @@
 import { chainInsightService } from './chainInsightService';
 import { questdbService } from './questDbService';
-import { kafkaService } from './kafka.service';  // NEW: Import Kafka for real-time KOL data
+import { kafkaService } from './kafka.service';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import type { TokenInfoResponse } from '../models/token.types';
@@ -18,11 +18,9 @@ export class TokenService {
             return data as TokenInfoResponse;
         }
 
-        // NEW: Kafka for real-time KOL trades (enrich community with live activity)
-        await kafkaService.connect();  // Ensure connected
-        const recentTrades = await this.getRecentKolTradesFromKafka(contractAddress, chain);  // Fetch recent from Kafka/DB
+        await kafkaService.connect();
+        const recentTrades = await this.getRecentKolTradesFromKafka(contractAddress, chain);
 
-        // Parallel API calls (narrative only for Solana)
         const apiCalls = [
             chainInsightService.post(config.baseUrls.community, { contractAddress, chain }),
             chainInsightService.post(config.baseUrls.callChannel, { contractAddress, chain })
@@ -36,7 +34,6 @@ export class TokenService {
 
         const [community, calls, ...narrativeArr] = await Promise.all(apiCalls);
 
-        // Enrich community with Kafka KOL trades (real-time activity)
         const enrichedCommunity = {
             ...community,
             kolCallInfo: {  // Proxy/add from Kafka trades
@@ -51,12 +48,11 @@ export class TokenService {
         };
 
         const fullData: TokenInfoResponse = {
-            narrative: { narrative: chain === 'Solana' ? narrativeArr[0] : 'N/A (Solana-only)' },  // Fallback
+            narrative: { narrative: chain === 'Solana' ? narrativeArr[0] : 'N/A (Solana-only)' },
             community: enrichedCommunity,
             calls
         };
 
-        // Insert to DB (includes Kafka-enriched data)
         await questdbService.insertBatch('token_info', [{
             timestamp: Date.now(),
             contract: contractAddress,
@@ -64,12 +60,11 @@ export class TokenService {
             chain
         }]);
 
-        await kafkaService.disconnect();  // Clean up per-call (or keep global)
+        await kafkaService.disconnect();
 
         return fullData;
     }
 
-    // NEW: Helper to get recent KOL trades from Kafka (via DB query, as consumer populates)
     private async getRecentKolTradesFromKafka(contractAddress: string, chain: string): Promise<any[]> {
         const sql = `
       SELECT kolId, action, amount, timestamp

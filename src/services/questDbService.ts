@@ -10,13 +10,12 @@ export class QuestDBService {
   private initialized = false;
 
   constructor() {
-    // PG client for queries/inserts/DDL (with auth) - Use for all ops (stateless)
     this.pgClient = new Client({
       host: config.questdb.host,
       port: config.questdb.pgPort,
-      database: 'qdb',  // QuestDB default
-      user: 'admin',    // Default username
-      password: 'quest' // Default password
+      database: 'qdb',
+      user: 'admin',
+      password: 'quest'
       // Add ssl: { rejectUnauthorized: false } if using HTTPS in prod
     });
   }
@@ -25,10 +24,8 @@ export class QuestDBService {
     if (this.initialized) return;
     try {
       await this.pgClient.connect();
-      // Test PG connection
       await this.pgClient.query({ text: 'SELECT 1 as ping;', rowMode: 'array' });
 
-      // Async init Sender (optional for bulk; use PG for now to avoid state issues)
       const tcpConfig = `tcp::addr=${config.questdb.host}:${config.questdb.fastPort};`;
       this.sender = await Sender.fromConfig(tcpConfig);
       await this.sender.connect();  // Optional: Explicit connect for health check
@@ -43,7 +40,6 @@ export class QuestDBService {
   }
 
   private async createTables(): Promise<void> {
-    // Inline TTL in CREATE (QuestDB requires this; no separate ALTER)
     const tables = [
       {
         name: 'prices',
@@ -96,7 +92,6 @@ export class QuestDBService {
     logger.info('QuestDB tables created/verified');
   }
 
-  // FIXED: Parameterized PG INSERT (single per row for safety; no SQL escaping issues)
   async insertBatch(table: string, rows: Array<Record<string, any>>): Promise<void> {
     if (rows.length === 0) return;
 
@@ -130,8 +125,8 @@ export class QuestDBService {
               Number(row.toTokenCount || 0),
               Number(row.toTokenRemainCount || 0),
               Number(row.walletType || 0),
-              JSON.stringify(row.recentBuyerKols || []),  // Array as JSON string
-              JSON.stringify(row.recentSellerKols || []),  // Array as JSON string
+              JSON.stringify(row.recentBuyerKols || []),
+              JSON.stringify(row.recentSellerKols || []),
               String(row.chain || 'BSC')
             ];
             break;

@@ -4,11 +4,11 @@ import { logger } from '../utils/logger';
 
 const kafka = new Kafka({
     clientId: 'chaininsight-consumer',
-    brokers: ['43.134.238.235:32777']  // Your ChainInsight Kafka broker
+    brokers: ['43.134.238.235:32777']
 });
 
 const consumer: Consumer = kafka.consumer({
-    groupId: process.env.KAFKA_GROUP_ID || 'your-username-here'  // Replace with your ChainInsight username
+    groupId: process.env.KAFKA_GROUP_ID || 'Greez'
 });
 
 export class KafkaService {
@@ -36,20 +36,18 @@ export class KafkaService {
                         return;
                     }
 
-                    // Log full received data to console
                     console.log('=== FULL KAFKA DATA RECEIVED ===');
                     console.log(JSON.stringify(tradeData, null, 2));
                     console.log('=== END KAFKA DATA ===\n');
 
                     // Process each item in data array (batches)
                     for (const trade of tradeData.data || []) {
-                        // FIXED: Timestamp as integer seconds (floor ms to s for TIMESTAMP)
                         const timestamp = Math.floor(Number(trade.createTime || Date.now()) / 1000);
 
                         // Parse amount with units (e.g., "3.89M" → 3890000)
                         const parseAmount = (str: string): number => {
                             if (!str || typeof str !== 'string') return 0;
-                            let num = parseFloat(str.replace(/[^\d.]/g, ''));  // Strip letters/units
+                            let num = parseFloat(str.replace(/[^\d.]/g, ''));
                             if (str.toUpperCase().includes('M')) num *= 1e6;
                             else if (str.toUpperCase().includes('K')) num *= 1e3;
                             return num;
@@ -78,7 +76,6 @@ export class KafkaService {
 
                         logger.info(`Kafka KOL trade push: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT)`);
 
-                        // Single-row insert for full data (timestamp as integer seconds)
                         await questdbService.insertBatch('kol_trades', [{
                             timestamp,
                             kolId,
@@ -104,7 +101,6 @@ export class KafkaService {
                     }
                 } catch (error) {
                     logger.error(`Kafka message processing failed (offset ${message.offset}):`, error);
-                    // Don't rethrow—let consumer continue (kafkajs handles retries)
                 }
             }
         });

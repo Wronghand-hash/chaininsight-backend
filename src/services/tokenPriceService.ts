@@ -7,7 +7,6 @@ import { questdbService } from './questDbService';
 
 export class PriceService {
     async getRealTimePrice(contractAddress: string, chain: 'Solana' | 'BSC' = 'Solana'): Promise<PriceResponse> {
-        // No caching - direct DexScreener fetch (reliable fallback; ChainInsight/CabalSpy lack price endpoints)
         try {
             const response = await axios.get(`${config.baseUrls.dexscreener}${contractAddress}`);
             const pair = response.data.pairs?.[0];
@@ -20,7 +19,6 @@ export class PriceService {
                 timestamp: Date.now()
             };
 
-            // Optional: Insert to DB for historical tracking (even without caching)
             await questdbService.insertBatch('prices', [{
                 timestamp: priceData.timestamp,
                 contract: contractAddress,
@@ -37,7 +35,6 @@ export class PriceService {
         }
     }
 
-    // Historical prices query (DB-based)
     async getHistoricalPrices(contract: string, chain: string, limit: number = 100): Promise<HistoricalPrice[]> {
         const sql = `
       SELECT timestamp, priceUsd, volume
@@ -49,7 +46,7 @@ export class PriceService {
         const res: QueryResult = await questdbService.query(sql);
         return res.rows.map(row => ({
             priceUsd: (row[1] as number).toString(),
-            priceChange: 0, // Derive via subquery if needed
+            priceChange: 0,
             volume: row[2] as number,
             timestamp: new Date(row[0] as Date).getTime()
         }));
