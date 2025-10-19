@@ -60,75 +60,80 @@ export class QuestDBService {
       {
         name: 'prices',
         create: `CREATE TABLE IF NOT EXISTS prices (
-          timestamp TIMESTAMP,
-          contract SYMBOL,
-          priceUsd DOUBLE,
-          volume DOUBLE,
-          chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+          timestamp TIMESTAMP,
+          contract SYMBOL,
+          priceUsd DOUBLE,
+          volume DOUBLE,
+          chain SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
       },
       {
         name: 'kol_trades',
         create: `CREATE TABLE IF NOT EXISTS kol_trades (
-          timestamp TIMESTAMP,
-          kolId STRING,
-          kolName STRING,
-          kolAvatar STRING,
-          kolTwitterId STRING,
-          contract SYMBOL,
-          action SYMBOL,
-          amount DOUBLE,
-          usdtPrice DOUBLE,
-          txHash SYMBOL,
-          fromToken STRING,
-          fromTokenAddress SYMBOL,
-          fromTokenCount DOUBLE,
-          toToken STRING,
-          toTokenAddress SYMBOL,
-          toTokenCount DOUBLE,
-          toTokenRemainCount DOUBLE,
-          walletType INT,
-          recentBuyerKols STRING,
-          recentSellerKols STRING,
-          chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
+          timestamp TIMESTAMP,
+          kolId STRING,
+          kolName STRING,
+          kolAvatar STRING,
+          kolTwitterId STRING,
+          contract SYMBOL,
+          action SYMBOL,
+          amount DOUBLE,
+          usdtPrice DOUBLE,
+            initialPrice DOUBLE, -- ⭐️ NEW: Added initialPrice column
+          txHash SYMBOL,
+          fromToken STRING,
+          fromTokenAddress SYMBOL,
+          fromTokenCount DOUBLE,
+          toToken STRING,
+          toTokenAddress SYMBOL,
+          toTokenCount DOUBLE,
+          toTokenRemainCount DOUBLE,
+          walletType INT,
+          recentBuyerKols STRING,
+          recentSellerKols STRING,
+          chain SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d
+          DEDUP UPSERT KEYS(txHash, contract);` // ⭐️ NEW: Added DEDUP UPSERT KEYS for deduplication
       },
       {
         name: 'token_info',
         create: `CREATE TABLE IF NOT EXISTS token_info (
-          timestamp TIMESTAMP,
-          contract SYMBOL,
-          data STRING,
-          chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 1d;`
+          timestamp TIMESTAMP,
+          contract SYMBOL,
+          data STRING,
+          chain SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 1d;`
       },
       {
         name: 'security_labels',
         create: `CREATE TABLE IF NOT EXISTS security_labels (
-          timestamp TIMESTAMP,
-          address SYMBOL,
-          data STRING,
-          chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+          timestamp TIMESTAMP,
+          address SYMBOL,
+          data STRING,
+          chain SYMBOL
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
       },
       {
         name: 'token_metrics',
         create: `CREATE TABLE IF NOT EXISTS token_metrics (
-          timestamp TIMESTAMP,
-          contract SYMBOL,
-          chain SYMBOL,
-          call_count INT,
-          kol_calls_count INT,
-          mention_user_count INT,
-          calls_data STRING,
-          community_data STRING,
-          narrative_data STRING
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+          timestamp TIMESTAMP,
+          contract SYMBOL,
+          chain SYMBOL,
+          call_count INT,
+          kol_calls_count INT,
+          mention_user_count INT,
+          calls_data STRING,
+          community_data STRING,
+          narrative_data STRING
+        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
       }
     ];
 
     for (const table of tables) {
       try {
+        // NOTE: For existing tables, QuestDB will attempt to apply the schema.
+        // It will fail if an incompatible change is made, such as changing a column type.
+        // Adding a new column (like initialPrice) is generally safe.
         await this.pgClient.query(table.create);
         logger.debug(`✅ Table verified: ${table.name}`);
       } catch (error) {
@@ -157,12 +162,11 @@ export class QuestDBService {
         switch (table) {
           case 'kol_trades':
             sql = `INSERT INTO kol_trades (
-              timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, txHash,
-              fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
-              walletType, recentBuyerKols, recentSellerKols, chain
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21);`;
+              kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, initialPrice, txHash,
+              fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
+              walletType, recentBuyerKols, recentSellerKols, chain, timestamp
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22);`; // ⭐️ NEW: $9 for initialPrice, $22 for timestamp
             values = [
-              row.timestamp,
               String(row.kolId || ''),
               String(row.kolName || ''),
               String(row.kolAvatar || ''),
@@ -171,6 +175,7 @@ export class QuestDBService {
               String(row.action || 'unknown'),
               Number(row.amount || 0),
               Number(row.usdtPrice || 0),
+              Number(row.initialPrice || 0), // ⭐️ NEW: initialPrice value
               String(row.txHash || ''),
               String(row.fromToken || ''),
               String(row.fromTokenAddress || ''),
@@ -180,53 +185,53 @@ export class QuestDBService {
               Number(row.toTokenCount || 0),
               Number(row.toTokenRemainCount || 0),
               Number(row.walletType || 0),
-              JSON.stringify(row.recentBuyerKols || []),
-              JSON.stringify(row.recentSellerKols || []),
-              String(row.chain || 'BSC')
+              JSON.stringify(row.recentBuyerKols || ''), // ⭐️ CHANGED: Using empty string for consistency
+              JSON.stringify(row.recentSellerKols || ''), // ⭐️ CHANGED: Using empty string for consistency
+              String(row.chain || 'BSC'),
+              new Date(Number(row.timestamp) * 1000), // ⭐️ NEW: Using Date object for TIMESTAMP type
             ];
             break;
 
           case 'prices':
-            sql = `INSERT INTO prices (timestamp, contract, priceUsd, volume, chain)
-                   VALUES ($1,$2,$3,$4,$5);`;
+            sql = `INSERT INTO prices (contract, priceUsd, volume, chain, timestamp)
+                   VALUES ($1,$2,$3,$4,$5);`;
             values = [
-              row.timestamp,
               String(row.contract),
               Number(row.priceUsd),
               Number(row.volume),
-              String(row.chain)
+              String(row.chain),
+              new Date(Number(row.timestamp) * 1000)
             ];
             break;
 
           case 'token_info':
-            sql = `INSERT INTO token_info (timestamp, contract, data, chain)
-                   VALUES ($1,$2,$3,$4);`;
+            sql = `INSERT INTO token_info (contract, data, chain, timestamp)
+                   VALUES ($1,$2,$3,$4);`;
             values = [
-              row.timestamp,
               String(row.contract),
               String(row.data),
-              String(row.chain)
+              String(row.chain),
+              new Date(row.timestamp)
             ];
             break;
 
           case 'security_labels':
-            sql = `INSERT INTO security_labels (timestamp, address, data, chain)
-                   VALUES ($1,$2,$3,$4);`;
+            sql = `INSERT INTO security_labels (address, data, chain, timestamp)
+                   VALUES ($1,$2,$3,$4);`;
             values = [
-              row.timestamp,
               String(row.address),
               String(row.data),
-              String(row.chain)
+              String(row.chain),
+              new Date(row.timestamp)
             ];
             break;
 
           case 'token_metrics':
             sql = `INSERT INTO token_metrics (
-              timestamp, contract, chain, call_count, kol_calls_count,
-              mention_user_count, calls_data, community_data, narrative_data
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);`;
+              contract, chain, call_count, kol_calls_count,
+              mention_user_count, calls_data, community_data, narrative_data, timestamp
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);`;
             values = [
-              row.timestamp,
               String(row.contract || ''),
               String(row.chain || 'BSC'),
               Number(row.call_count || 0),
@@ -234,7 +239,8 @@ export class QuestDBService {
               Number(row.mention_user_count || 0),
               JSON.stringify(row.calls_data || {}),
               JSON.stringify(row.community_data || {}),
-              JSON.stringify(row.narrative_data || {})
+              JSON.stringify(row.narrative_data || {}),
+              new Date(row.timestamp)
             ];
             break;
 
