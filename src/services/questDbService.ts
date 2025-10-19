@@ -17,6 +17,7 @@ export class QuestDBService {
   private sender?: Sender;
   private pgClient: Client;
   private initialized = false;
+  private initPromise?: Promise<void>;
 
   constructor() {
     this.pgClient = new Client({
@@ -31,31 +32,42 @@ export class QuestDBService {
 
   async init(): Promise<void> {
     if (this.initialized) {
-      logger.debug('QuestDB already initialized, skipping re-init');
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug('QuestDB already initialized, skipping re-init');
+      }
       return;
     }
 
-    try {
-      logger.info('Initializing QuestDB...');
-      await this.pgClient.connect();
-      await this.pgClient.query('SELECT 1 as ping;');
-
-      const tcpConfig = `tcp::addr=${config.questdb.host}:${config.questdb.fastPort};`;
-      this.sender = await Sender.fromConfig(tcpConfig);
-
-      // Optional connect check
-      await this.sender.connect();
-
-      await this.createTables();
-      this.initialized = true;
-      logger.info('✅ QuestDB initialized successfully (PG + Sender)');
-    } catch (error) {
-      logger.error('❌ QuestDB initialization failed', error);
-      throw error;
+    if (this.initPromise) {
+      return this.initPromise;
     }
+
+    this.initPromise = (async () => {
+      try {
+        logger.info('Initializing QuestDB...');
+        await this.pgClient.connect();
+        await this.pgClient.query('SELECT 1 as ping;');
+
+        const tcpConfig = `tcp::addr=${config.questdb.host}:${config.questdb.fastPort};`;
+        this.sender = await Sender.fromConfig(tcpConfig);
+
+        // Optional connect check
+        await this.sender.connect();
+
+        await this.createTables();
+        this.initialized = true;
+        logger.info('✅ QuestDB initialized successfully (PG + Sender)');
+      } catch (error) {
+        logger.error('❌ QuestDB initialization failed', error);
+        throw error;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   private async createTables(): Promise<void> {
+    const wal = config.questdb.enableWal ? ' WAL' : '';
     const tables = [
       {
         name: 'prices',
@@ -65,7 +77,7 @@ export class QuestDBService {
           priceUsd DOUBLE,
           volume DOUBLE,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
       },
       {
         name: 'kol_trades',
@@ -93,7 +105,7 @@ export class QuestDBService {
           recentBuyerKols STRING,
           recentSellerKols STRING,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 30d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 30d;`
       },
       {
         name: 'token_info',
@@ -102,7 +114,7 @@ export class QuestDBService {
           contract SYMBOL,
           data STRING,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 1d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 1d;`
       },
       {
         name: 'security_labels',
@@ -111,7 +123,7 @@ export class QuestDBService {
           address SYMBOL,
           data STRING,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
       },
       {
         name: 'token_metrics',
@@ -126,7 +138,7 @@ export class QuestDBService {
           community_data STRING,
           narrative_data STRING,
           updated_at TIMESTAMP
-        ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
       }
     ];
 
@@ -156,56 +168,79 @@ export class QuestDBService {
       for (const row of rows) {
         // Special handling for token_metrics with SELECT-then-UPSERT logic
         if (table === 'token_metrics') {
-          const esc = (v: any) => String(v ?? '').replace(/'/g, "''");
           const nowIso = new Date().toISOString();
-          const ts = esc(row.timestamp);
-          const contract = esc(String(row.contract || ''));
-          const chain = esc(String(row.chain || 'BSC'));
+          const ts = String(row.timestamp ?? nowIso);
+          const contract = String(row.contract || '');
+          const chain = String(row.chain || 'BSC');
           const callCount = Number(row.call_count || 0);
           const kolCallsCount = Number(row.kol_calls_count || 0);
           const mentionUserCount = Number(row.mention_user_count || 0);
-          const callsData = esc(JSON.stringify(row.calls_data || {}));
-          const communityData = esc(JSON.stringify(row.community_data || {}));
-          const narrativeData = esc(JSON.stringify(row.narrative_data || {}));
+          const callsData = JSON.stringify(row.calls_data || {});
+          const communityData = JSON.stringify(row.community_data || {});
+          const narrativeData = JSON.stringify(row.narrative_data || {});
 
-          const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = '${contract}' AND chain = '${chain}';`;
-          const checkRes = await this.pgClient.query(checkSql);
+          const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = $1 AND chain = $2;`;
+          const checkRes = await this.pgClient.query(checkSql, [contract, chain]);
           const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
 
           let operation: string;
           if (exists) {
             operation = 'updated';
             const updateSql = `UPDATE token_metrics SET
-              call_count = ${callCount},
-              kol_calls_count = ${kolCallsCount},
-              mention_user_count = ${mentionUserCount},
-              calls_data = '${callsData}',
-              community_data = '${communityData}',
-              narrative_data = '${narrativeData}',
-              updated_at = '${esc(nowIso)}'
-            WHERE contract = '${contract}' AND chain = '${chain}';`;
-            await this.pgClient.query(updateSql);
+              call_count = $1,
+              kol_calls_count = $2,
+              mention_user_count = $3,
+              calls_data = $4,
+              community_data = $5,
+              narrative_data = $6,
+              updated_at = $7
+            WHERE contract = $8 AND chain = $9;`;
+            await this.pgClient.query(updateSql, [
+              callCount,
+              kolCallsCount,
+              mentionUserCount,
+              callsData,
+              communityData,
+              narrativeData,
+              nowIso,
+              contract,
+              chain,
+            ]);
           } else {
             operation = 'inserted';
             const insertSql = `INSERT INTO token_metrics (
               timestamp, contract, chain, call_count, kol_calls_count,
               mention_user_count, calls_data, community_data, narrative_data, updated_at
             ) VALUES (
-              '${ts}', '${contract}', '${chain}', ${callCount}, ${kolCallsCount}, ${mentionUserCount},
-              '${callsData}', '${communityData}', '${narrativeData}', '${esc(nowIso)}'
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
             );`;
-            await this.pgClient.query(insertSql);
+            await this.pgClient.query(insertSql, [
+              ts,
+              contract,
+              chain,
+              callCount,
+              kolCallsCount,
+              mentionUserCount,
+              callsData,
+              communityData,
+              narrativeData,
+              nowIso,
+            ]);
           }
 
-          logger.debug(`[QuestDB] Successfully ${operation} row in token_metrics.`);
+          if (config.questdb.diagnosticsVerbose) {
+            logger.debug(`[QuestDB] Successfully ${operation} row in token_metrics.`);
+          }
 
-          try {
-            const total = await this.pgClient.query('SELECT count(*) AS total FROM token_metrics;');
-            logger.debug(`[QuestDB] token_metrics total=${total?.rows?.[0]?.total ?? 'N/A'}`);
-            const sample = await this.pgClient.query(`SELECT * FROM token_metrics ORDER BY updated_at DESC LIMIT 5;`);
-            logger.debug(`[QuestDB] token_metrics latest sample=${JSON.stringify(sample?.rows ?? [])}`);
-          } catch (diagError) {
-            logger.warn('⚠️ token_metrics diagnostic query failed', diagError);
+          if (config.questdb.diagnosticsVerbose) {
+            try {
+              const total = await this.pgClient.query('SELECT count(*) AS total FROM token_metrics;');
+              logger.debug(`[QuestDB] token_metrics total=${total?.rows?.[0]?.total ?? 'N/A'}`);
+              const sample = await this.pgClient.query(`SELECT * FROM token_metrics ORDER BY updated_at DESC LIMIT 5;`);
+              logger.debug(`[QuestDB] token_metrics latest sample=${JSON.stringify(sample?.rows ?? [])}`);
+            } catch (diagError) {
+              logger.warn('⚠️ token_metrics diagnostic query failed', diagError);
+            }
           }
 
           continue; // Skip to the next row
@@ -286,11 +321,15 @@ export class QuestDBService {
             throw new Error(`Unsupported table: ${table}`);
         }
 
-        logger.debug(`[QuestDB] inserting into ${table} => ${JSON.stringify(row, null, 2)}`);
+        if (config.questdb.diagnosticsVerbose) {
+          logger.debug(`[QuestDB] inserting into ${table} => ${JSON.stringify(row, null, 2)}`);
+        }
         await this.pgClient.query(sql, values);
       }
 
-      logger.debug(`✅ Inserted ${rows.length} rows into ${table}`);
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug(`✅ Inserted ${rows.length} rows into ${table}`);
+      }
     } catch (error) {
       logger.error(`❌ PG insert failed for ${table}`, error);
       throw error;
@@ -355,6 +394,7 @@ export class QuestDBService {
     }
     await this.pgClient.end();
     this.initialized = false;
+    this.initPromise = undefined;
     logger.info('🔒 QuestDB connections closed');
   }
 }

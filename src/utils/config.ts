@@ -8,7 +8,12 @@ export const config = {
   questdb: {
     host: process.env.QUESTDB_HOST || 'localhost',
     fastPort: parseInt(process.env.QUESTDB_FAST_PORT || '9009'),
-    pgPort: parseInt(process.env.QUESTDB_PG_PORT || '8812')
+    pgPort: parseInt(process.env.QUESTDB_PG_PORT || '8812'),
+    useIlpForWrites: (process.env.QUESTDB_USE_ILP_WRITES || 'false').toLowerCase() === 'true',
+    enableWal: (process.env.QUESTDB_ENABLE_WAL || 'false').toLowerCase() === 'true',
+    diagnosticsVerbose: (process.env.QUESTDB_DIAGNOSTICS_VERBOSE || 'false').toLowerCase() === 'true',
+    ilpFlushRows: parseInt(process.env.QUESTDB_ILP_FLUSH_ROWS || '1000'),
+    ilpFlushMs: parseInt(process.env.QUESTDB_ILP_FLUSH_MS || '250')
   },
 
   baseUrls: {
