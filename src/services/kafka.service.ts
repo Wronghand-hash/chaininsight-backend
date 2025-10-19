@@ -11,11 +11,27 @@ const consumer: Consumer = kafka.consumer({
     groupId: process.env.KAFKA_GROUP_ID || 'Greez'
 });
 
+const processedTxCache: Map<string, number> = new Map();
+const DUP_TTL_MS = 5 * 60 * 1000;
+const pruneProcessedTxCache = () => {
+    const now = Date.now();
+    for (const [tx, ts] of processedTxCache) {
+        if (now - ts > DUP_TTL_MS) processedTxCache.delete(tx);
+    }
+    if (processedTxCache.size > 10000) {
+        let removed = 0;
+        for (const key of processedTxCache.keys()) {
+            processedTxCache.delete(key);
+            if (++removed >= 1000) break;
+        }
+    }
+};
+
 // Define the mapping for actionType
 const ACTION_TYPE_MAP: { [key: string]: string } = {
     '0': 'default',
-    '1': 'buy',
-    '2': 'add', // Typically for liquidity
+    '1': 'initial_position',
+    '2': 'add_position',
     '3': 'partial_sell',
     '4': 'full_sell'
 };
@@ -46,7 +62,6 @@ const parseNumericValue = (str: string | undefined): number => {
     return isNaN(num) ? 0 : num;
 };
 
-
 export class KafkaService {
     async connect() {
         await consumer.connect();
@@ -58,6 +73,7 @@ export class KafkaService {
         await consumer.run({
             eachMessage: async ({ topic, partition, message }: EachMessagePayload) => {
                 try {
+                    pruneProcessedTxCache();
                     const rawValue = message.value?.toString();
                     if (!rawValue) {
                         logger.warn('Empty Kafka message - skipping');
@@ -83,6 +99,13 @@ export class KafkaService {
                             continue;
                         }
 
+                        const now = Date.now();
+                        const lastSeen = processedTxCache.get(txHash);
+                        if (lastSeen && now - lastSeen < DUP_TTL_MS) {
+                            logger.debug(`⏩ Skipping duplicate tx ${txHash}`);
+                            continue;
+                        }
+
                         // === Data Parsing and Assignment ===
                         const timestamp = Math.floor(parseNumericValue(trade.createTime || String(Date.now())) / 1000);
 
@@ -95,23 +118,24 @@ export class KafkaService {
                         const action = ACTION_TYPE_MAP[actionTypeKey] || 'unknown';
 
                         // Amount is the count of the token being received (toTokenCount)
-                        const amount = parseNumericValue(trade.toTokenCount);
+                        const amount = String(trade.toTokenCount ?? '');
 
                         const contract = String(trade.toTokenAddress || '');
                         const chain = String(trade.chainName || 'BSC').toUpperCase(); // Normalise chain name
 
                         // NEW: Price/Value Fields
-                        const usdtPrice = parseNumericValue(trade.usdtPrice); // USDT value of the trade
-                        const initialPrice = parseNumericValue(trade.initialPrice); // Price of the token at the time of the trade
+                        const usdtPrice = String(trade.usdtPrice ?? '');
+                        const initialPrice = String(trade.initialPrice ?? '');
 
                         const fromToken = String(trade.fromToken || '');
                         const fromTokenAddress = String(trade.fromTokenAddress || '');
-                        const fromTokenCount = parseNumericValue(trade.fromTokenCount);
+                        const fromTokenCount = String(trade.fromTokenCount ?? '');
+
 
                         const toToken = String(trade.toToken || '');
                         const toTokenAddress = String(trade.toTokenAddress || '');
-                        const toTokenRemainCount = parseNumericValue(trade.toTokenRemainCount);
-                        const walletType = parseNumericValue(trade.walletType);
+                        const toTokenRemainCount = String(trade.toTokenRemainCount ?? '');
+                        const walletType = trade.walletType;
 
                         const recentBuyerKols = JSON.stringify(trade.recentBuyerKols || []);
                         const recentSellerKols = JSON.stringify(trade.recentSellerKols || []);
@@ -123,7 +147,10 @@ export class KafkaService {
                             continue;
                         }
 
-                        logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice.toFixed(2)} USDT)`);
+                        console.log(trade, "trade"
+                        );
+
+                        logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT)`);
 
                         // NOTE ON DUPLICATES: 
                         // The primary key for 'kol_trades' should ideally be (txHash, timestamp) 
@@ -141,19 +168,23 @@ export class KafkaService {
                             action,
                             amount,
                             usdtPrice,
-                            initialPrice, // NEW: Added initial price
+                            initialPrice,
                             txHash,
                             fromToken,
                             fromTokenAddress,
                             fromTokenCount,
                             toToken,
                             toTokenAddress,
+                            toTokenCount: amount,
                             toTokenRemainCount,
                             walletType,
                             recentBuyerKols,
                             recentSellerKols,
                             chain
                         }]);
+
+                        // Mark as processed only after successful insert
+                        processedTxCache.set(txHash, now);
                     }
                 } catch (error) {
                     logger.error(`Kafka message processing failed (offset ${message.offset}):`, error);

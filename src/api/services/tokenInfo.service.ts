@@ -19,7 +19,10 @@ class tokenInfoServiceApi {
             volume: priceData.volume,
             marketCap: priceData.marketCap,
             telegramChannels: tokenInfo.calls.callChannelInfo?.callChannels,
-            kolTwitters: tokenInfo.community.communityAttentionInfo?.communityAttentions
+            kolTwitters: tokenInfo.community.communityAttentionInfo?.communityAttentions,
+            alertChange: tokenInfo.community.alertChanceInfo?.alertChances,
+            kolCalls: tokenInfo.community.kolCallInfo?.kolCalls,
+            communityAttention: tokenInfo.community.communityAttentionInfo?.communityAttentions,
         }
         console.log(tokenInfo, "result");
         return result;
