@@ -36,9 +36,7 @@ export class KafkaService {
                         return;
                     }
 
-                    console.log('=== FULL KAFKA DATA RECEIVED ===');
-                    console.log(JSON.stringify(tradeData, null, 2));
-                    console.log('=== END KAFKA DATA ===\n');
+
 
                     // Process each item in data array (batches)
                     for (const trade of tradeData.data || []) {
@@ -61,7 +59,7 @@ export class KafkaService {
                         const action = trade.actionType ? ['default', 'buy', 'add', 'partial_sell', 'full_sell'][trade.actionType] || 'unknown' : 'unknown';
                         const amount = parseAmount(trade.toTokenCount || '0');
                         const contract = String(trade.toTokenAddress || '');
-                        const chain = String(trade.chainName || 'BSC');
+                        const chain = String(trade.chainName || 'BSC'); // Defaults to 'BSC'
                         const usdtPrice = Number(trade.usdtPrice || 0);
                         const txHash = String(trade.transactionHash || '');
                         const fromToken = String(trade.fromToken || '');
@@ -74,30 +72,38 @@ export class KafkaService {
                         const recentBuyerKols = JSON.stringify(trade.recentBuyerKols || []);
                         const recentSellerKols = JSON.stringify(trade.recentSellerKols || []);
 
-                        logger.info(`Kafka KOL trade push: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT)`);
-
-                        await questdbService.insertBatch('kol_trades', [{
-                            timestamp,
-                            kolId,
-                            kolName,
-                            kolAvatar,
-                            kolTwitterId,
-                            contract,
-                            action,
-                            amount,
-                            usdtPrice,
-                            txHash,
-                            fromToken,
-                            fromTokenAddress,
-                            fromTokenCount,
-                            toToken,
-                            toTokenAddress,
-                            toTokenRemainCount,
-                            walletType,
-                            recentBuyerKols,
-                            recentSellerKols,
-                            chain
-                        }]);
+                        logger.info(`Kafka KOL trade received: ${kolName} ${action} ${amount} of ${contract} on ${chain}`);
+                        if (chain.toUpperCase() === 'BSC') {
+                            logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract}`);
+                            console.log('=== FULL KAFKA DATA RECEIVED ===');
+                            console.log(JSON.stringify(tradeData, null, 2));
+                            console.log('=== END KAFKA DATA ===\n');
+                            await questdbService.insertBatch('kol_trades', [{
+                                timestamp,
+                                kolId,
+                                kolName,
+                                kolAvatar,
+                                kolTwitterId,
+                                contract,
+                                action,
+                                amount,
+                                usdtPrice,
+                                txHash,
+                                fromToken,
+                                fromTokenAddress,
+                                fromTokenCount,
+                                toToken,
+                                toTokenAddress,
+                                toTokenRemainCount,
+                                walletType,
+                                recentBuyerKols,
+                                recentSellerKols,
+                                chain
+                            }]);
+                        } else {
+                            // Optional: Log trades from other chains that were filtered out
+                            logger.debug(`⏩ Skipping trade from non-BSC chain: ${chain}`);
+                        }
                     }
                 } catch (error) {
                     logger.error(`Kafka message processing failed (offset ${message.offset}):`, error);
