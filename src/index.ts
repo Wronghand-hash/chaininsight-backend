@@ -33,8 +33,8 @@ app.use((err: Error, req: any, res: any, next: any) => {
 (async () => {
   try {
     await questdbService.init();
-    await kafkaService.connect();  // NEW: Connect Kafka consumer
-    await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
+    // await kafkaService.connect();  // NEW: Connect Kafka consumer
+    // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
     });

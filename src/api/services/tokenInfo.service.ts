@@ -18,10 +18,10 @@ class tokenInfoServiceApi {
             priceUsd: priceData.priceUsd,
             volume: priceData.volume,
             marketCap: priceData.marketCap,
-            telegramChannels: tokenInfo.calls.callChannelInfo.callChannels,
-            kolTwitters: tokenInfo.community.communityAttentionInfo.communityAttentions
+            telegramChannels: tokenInfo.calls.callChannelInfo?.callChannels,
+            kolTwitters: tokenInfo.community.communityAttentionInfo?.communityAttentions
         }
-        console.log(result, "result");
+        console.log(tokenInfo, "result");
         return result;
     }
 }

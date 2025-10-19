@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getKolLeaderboards, } from '../controllers/leaderboard.controller';
+import { getTokenDetails } from '../controllers/tokenInfo.controller';
 
 const kolsLeaderboardRouter = Router();
 
@@ -11,6 +12,13 @@ const kolsLeaderboardRouter = Router();
  * - chain (optional,   'BSC' )
  */
 kolsLeaderboardRouter.get('/leaderboard', getKolLeaderboards);
+/**
+ * GET /api/v1/token/info
+ * Fetches aggregated token details (price, narrative, social) for a specific contract.
+ * Query Params:
+ * - contractAddress (required)
+ */
+kolsLeaderboardRouter.get('/info', getTokenDetails);
 
 
 

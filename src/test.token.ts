@@ -20,7 +20,7 @@ import { tokenInfoApiService } from './api/services/tokenInfo.service';
 
 async function testTokenInfo() {
     const kolService = new KolService();
-    const contractAddress = '0xc160598F2f5b216b48FA36007b4538114A234444'; // USDT on BSC
+    const contractAddress = '0x12d9bd314a023fb6057fcd86db5ed40019b24444'; // USDT on BSC
     const chain = 'BSC';
 
     console.log(`\n--- Testing Token Leaderboard for ${chain} token: ${contractAddress} ---\n`);
