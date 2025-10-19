@@ -7,7 +7,7 @@ export class KolService {
      * via the CabalSpy test-endpoint API.
      */
     async getLeaderboards(contractAddress: string, chain: 'Solana' | 'BSC' = 'Solana'): Promise<KolLeaderboardResponse> {
-        const endpointUrl = `http://148.230.111.181:8080/api/Token/KOL_Leaderboard?mint=${contractAddress}&api_key=8oeAp5JXNovdMDx7DEJyf8gx1ux62lXRFX2O035m8jk`;
+        const endpointUrl = `http://148.230.111.181:8080/api/Token/KOL_Leaderboard_bnb?mint=${contractAddress}&api_key=8oeAp5JXNovdMDx7DEJyf8gx1ux62lXRFX2O035m8jk`;
 
         const res = await fetch("https://apidashboard.cabalspy.xyz/test-endpoint", {
             method: "POST",
