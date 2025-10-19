@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import { logger } from './utils/logger';
 import { questdbService } from './services/questDbService';
 import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
+import kolsLeaderboardRouter from './api/router/leaderboard.route';
 // Note: Routes/controllers omitted per request; add back as needed
 
 dotenv.config();
@@ -16,6 +17,8 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+
+app.use('/api/v1/kol', kolsLeaderboardRouter);
 
 // Health check
 app.get('/health', (req, res) => res.status(200).json({ status: 'OK', db: 'QuestDB ready', kafka: 'Connected' }));
