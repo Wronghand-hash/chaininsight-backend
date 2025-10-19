@@ -14,6 +14,7 @@ class tokenInfoServiceApi {
         const priceData = await priceService.getRealTimePrice(contractAddress);
         const result = {
             title: tokenInfo.narrative.symbol,
+            contractAddress: contractAddress,
             description: tokenInfo.narrative.narrative,
             priceUsd: priceData.priceUsd,
             volume: priceData.volume,

@@ -124,7 +124,8 @@ export class QuestDBService {
           mention_user_count INT,
           calls_data STRING,
           community_data STRING,
-          narrative_data STRING
+          narrative_data STRING,
+          updated_at TIMESTAMP
         ) TIMESTAMP(timestamp) PARTITION BY DAY TTL 7d;`
       }
     ];
@@ -153,12 +154,69 @@ export class QuestDBService {
 
     try {
       for (const row of rows) {
+        // Special handling for token_metrics with SELECT-then-UPSERT logic
+        if (table === 'token_metrics') {
+          const esc = (v: any) => String(v ?? '').replace(/'/g, "''");
+          const nowIso = new Date().toISOString();
+          const ts = esc(row.timestamp);
+          const contract = esc(String(row.contract || ''));
+          const chain = esc(String(row.chain || 'BSC'));
+          const callCount = Number(row.call_count || 0);
+          const kolCallsCount = Number(row.kol_calls_count || 0);
+          const mentionUserCount = Number(row.mention_user_count || 0);
+          const callsData = esc(JSON.stringify(row.calls_data || {}));
+          const communityData = esc(JSON.stringify(row.community_data || {}));
+          const narrativeData = esc(JSON.stringify(row.narrative_data || {}));
+
+          const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = '${contract}' AND chain = '${chain}';`;
+          const checkRes = await this.pgClient.query(checkSql);
+          const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
+
+          let operation: string;
+          if (exists) {
+            operation = 'updated';
+            const updateSql = `UPDATE token_metrics SET
+              call_count = ${callCount},
+              kol_calls_count = ${kolCallsCount},
+              mention_user_count = ${mentionUserCount},
+              calls_data = '${callsData}',
+              community_data = '${communityData}',
+              narrative_data = '${narrativeData}',
+              updated_at = '${esc(nowIso)}'
+            WHERE contract = '${contract}' AND chain = '${chain}';`;
+            await this.pgClient.query(updateSql);
+          } else {
+            operation = 'inserted';
+            const insertSql = `INSERT INTO token_metrics (
+              timestamp, contract, chain, call_count, kol_calls_count,
+              mention_user_count, calls_data, community_data, narrative_data, updated_at
+            ) VALUES (
+              '${ts}', '${contract}', '${chain}', ${callCount}, ${kolCallsCount}, ${mentionUserCount},
+              '${callsData}', '${communityData}', '${narrativeData}', '${esc(nowIso)}'
+            );`;
+            await this.pgClient.query(insertSql);
+          }
+
+          logger.debug(`[QuestDB] Successfully ${operation} row in token_metrics.`);
+
+          try {
+            const total = await this.pgClient.query('SELECT count(*) AS total FROM token_metrics;');
+            logger.debug(`[QuestDB] token_metrics total=${total?.rows?.[0]?.total ?? 'N/A'}`);
+            const sample = await this.pgClient.query(`SELECT * FROM token_metrics ORDER BY updated_at DESC LIMIT 5;`);
+            logger.debug(`[QuestDB] token_metrics latest sample=${JSON.stringify(sample?.rows ?? [])}`);
+          } catch (diagError) {
+            logger.warn('⚠️ token_metrics diagnostic query failed', diagError);
+          }
+
+          continue; // Skip to the next row
+        }
+
+        // Generic logic for all other tables
         let sql: string;
         let values: any[];
 
         switch (table) {
           case 'kol_trades':
-            // FIX: Added 'initialPrice' to the column list and updated placeholders to $22.
             sql = `INSERT INTO kol_trades (
               timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, initialPrice, txHash,
               fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
@@ -174,9 +232,8 @@ export class QuestDBService {
               String(row.action || 'unknown'),
               String(row.amount || ''),
               String(row.usdtPrice || ''),
-              // FIX: Added initialPrice value
-              String(row.initialPrice || ''), // $10
-              String(row.txHash || ''), // $11 (shifted)
+              String(row.initialPrice || ''),
+              String(row.txHash || ''),
               String(row.fromToken || ''),
               String(row.fromTokenAddress || ''),
               String(row.fromTokenCount || ''),
@@ -187,7 +244,7 @@ export class QuestDBService {
               Number(row.walletType || 0),
               JSON.stringify(row.recentBuyerKols || []),
               JSON.stringify(row.recentSellerKols || []),
-              String(row.chain || 'BSC') // $22
+              String(row.chain || 'BSC')
             ];
             break;
 
@@ -225,24 +282,6 @@ export class QuestDBService {
             ];
             break;
 
-          case 'token_metrics':
-            sql = `INSERT INTO token_metrics (
-              timestamp, contract, chain, call_count, kol_calls_count,
-              mention_user_count, calls_data, community_data, narrative_data
-            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);`;
-            values = [
-              row.timestamp,
-              String(row.contract || ''),
-              String(row.chain || 'BSC'),
-              Number(row.call_count || 0),
-              Number(row.kol_calls_count || 0),
-              Number(row.mention_user_count || 0),
-              JSON.stringify(row.calls_data || {}),
-              JSON.stringify(row.community_data || {}),
-              JSON.stringify(row.narrative_data || {})
-            ];
-            break;
-
           default:
             throw new Error(`Unsupported table: ${table}`);
         }
@@ -262,14 +301,18 @@ export class QuestDBService {
    * Transforms and saves aggregated token info into the token_metrics table.
    */
   async saveTokenMetrics(contractAddress: string, chain: Chain, data: TokenInfoResponse): Promise<void> {
-    this.ensureInit();
+    if (!this.initialized) {
+      await this.init();
+    }
 
     const kolCallInfo = data.community?.kolCallInfo;
     console.log('kolCallInfo', kolCallInfo);
+    const normContract = (contractAddress || '').toLowerCase();
+    const normChain = (chain || 'BSC').toUpperCase() as Chain;
     const row = {
-      timestamp: new Date().toISOString(), // UTC timestamp
-      contract: contractAddress,
-      chain: chain,
+      timestamp: new Date().toISOString(),
+      contract: normContract,
+      chain: normChain,
       call_count: data.calls?.callChannelInfo?.callChannels?.length || 0,
       kol_calls_count: kolCallInfo?.kolCalls?.length || 0,
       mention_user_count: kolCallInfo?.mentionUserCount || 0,
