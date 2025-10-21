@@ -138,7 +138,7 @@ export class QuestDBService {
           community_data STRING,
           narrative_data STRING,
           updated_at TIMESTAMP
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       }
     ];
 
@@ -179,35 +179,26 @@ export class QuestDBService {
           const communityData = JSON.stringify(row.community_data || {});
           const narrativeData = JSON.stringify(row.narrative_data || {});
 
+          // Check existence (binds are fine for SELECT)
           const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = $1 AND chain = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [contract, chain]);
           const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
 
-          let operation: string;
           if (exists) {
-            operation = 'updated';
+            // Perform UPDATE without bind variables to avoid QuestDB PG limitation
+            const esc = (s: string) => s.replace(/'/g, "''");
             const updateSql = `UPDATE token_metrics SET
-              call_count = $1,
-              kol_calls_count = $2,
-              mention_user_count = $3,
-              calls_data = $4,
-              community_data = $5,
-              narrative_data = $6,
-              updated_at = $7
-            WHERE contract = $8 AND chain = $9;`;
-            await this.pgClient.query(updateSql, [
-              callCount,
-              kolCallsCount,
-              mentionUserCount,
-              callsData,
-              communityData,
-              narrativeData,
-              nowIso,
-              contract,
-              chain,
-            ]);
+              call_count = ${callCount},
+              kol_calls_count = ${kolCallsCount},
+              mention_user_count = ${mentionUserCount},
+              calls_data = '${esc(callsData)}',
+              community_data = '${esc(communityData)}',
+              narrative_data = '${esc(narrativeData)}',
+              updated_at = '${esc(nowIso)}'
+            WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
+            await this.pgClient.query(updateSql);
           } else {
-            operation = 'inserted';
+            // First write: INSERT with binds (works over PG wire)
             const insertSql = `INSERT INTO token_metrics (
               timestamp, contract, chain, call_count, kol_calls_count,
               mention_user_count, calls_data, community_data, narrative_data, updated_at
@@ -226,10 +217,6 @@ export class QuestDBService {
               narrativeData,
               nowIso,
             ]);
-          }
-
-          if (config.questdb.diagnosticsVerbose) {
-            logger.debug(`[QuestDB] Successfully ${operation} row in token_metrics.`);
           }
 
           if (config.questdb.diagnosticsVerbose) {

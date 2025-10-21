@@ -35,7 +35,7 @@ class tokenInfoServiceApi {
                 },
                 goplusSecurity: {
                     isWarning: tokenInfo.goplusSecurity?.sell_tax >= 50,
-                    anti_whale_modifiable: tokenInfo.goplusSecurity?.anti_whale_modifiable,
+                    anti_whale_modifiable: tokenInfo.goplusSecurity?.anti_whale_modifiable === "0" ? false : true,
                     buy_tax: tokenInfo.goplusSecurity?.buy_tax,
                     can_take_back_ownership: tokenInfo.goplusSecurity?.can_take_back_ownership,
                     cannot_buy: tokenInfo.goplusSecurity?.cannot_buy,
@@ -61,7 +61,6 @@ class tokenInfoServiceApi {
                     is_in_dex: tokenInfo.goplusSecurity?.is_in_dex,
                     is_mintable: tokenInfo.goplusSecurity?.is_mintable,
                     is_open_source: tokenInfo.goplusSecurity?.is_open_source,
-                    is_proxy: tokenInfo.goplusSecurity?.is_proxy,
                     is_whitelisted: tokenInfo.goplusSecurity?.is_whitelisted,
                     lp_holder_count: tokenInfo.goplusSecurity?.lp_holder_count,
                     lp_holders: tokenInfo.goplusSecurity?.lp_holders,
@@ -75,8 +74,6 @@ class tokenInfoServiceApi {
                     sell_tax: tokenInfo.goplusSecurity?.sell_tax,
                     slippage_modifiable: tokenInfo.goplusSecurity?.slippage_modifiable,
                     total_supply: tokenInfo.goplusSecurity?.total_supply,
-                    trading_cooldown: tokenInfo.goplusSecurity?.trading_cooldown,
-                    transfer_pausable: tokenInfo.goplusSecurity?.transfer_pausable,
                     transfer_tax: tokenInfo.goplusSecurity?.transfer_tax
                 },
             },
