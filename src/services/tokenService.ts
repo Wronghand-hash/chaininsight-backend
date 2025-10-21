@@ -1,4 +1,4 @@
-// TokenService.ts (Updated with Honeypot API integration)
+// TokenService.ts (Updated with Honeypot API integration and GoPlus Labs security integration)
 
 import { config } from '../utils/config';
 import { chainInsightService } from './chainInsightService';
@@ -18,6 +18,7 @@ type TokenInfoResponse = {
     calls: any;
     pairs?: any[]; // NEW: Array of pair objects from Honeypot API
     honeypot?: any; // NEW: Honeypot analysis result
+    goplusSecurity?: any; // NEW: GoPlus Labs security analysis result
 };
 const logger = { info: console.log, warn: console.warn };
 
@@ -44,6 +45,7 @@ export class TokenService {
      * * instead of relying on the potentially incorrect config.ENDPOINTS.
      * * NEW: Added parallel fetch to Honeypot API for liquidity pairs data.
      * * NEW: Added sequential fetch to Honeypot IsHoneypot API using the primary pair from GetPairs.
+     * * NEW: Added parallel fetch to GoPlus Labs API for token security analysis.
      */
     async getTokenInfo(contractAddress: string, chain: Chain = 'BSC'): Promise<TokenInfoResponse> {
         logger.info('Starting token info fetch for', contractAddress, 'on', chain);
@@ -114,12 +116,41 @@ export class TokenService {
             return []; // Graceful fallback: empty array on failure
         });
 
+        // --- NEW: GoPlus Labs API Call for Token Security ---
+        const goplusUrl = `https://open-api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${contractAddress}`;
+        logger.info(`[DEBUG] Preparing GET Request for GOPLUS SECURITY:`);
+        logger.info(` 	URL: ${goplusUrl}`);
+
+        const goplusPromise = fetch(goplusUrl, {
+            credentials: 'omit',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0',
+                'Accept': 'application/json, text/plain, */*',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site'
+            },
+            referrer: 'https://gopluslabs.io/',
+            method: 'GET',
+            mode: 'cors'
+        }).then(response => {
+            if (!response.ok) {
+                throw new Error(`GoPlus Labs API error: ${response.status}`);
+            }
+            return response.json();
+        }).catch(error => {
+            logger.warn(`GoPlus Labs API fetch failed for ${contractAddress}:`, error);
+            return { code: 0, message: 'Error', result: {} }; // Graceful fallback: empty result on failure
+        });
+
         const apiCalls: Promise<any>[] = [
             communityPromise,
             callsPromise,
             kolTradePromise,
             narrativePromise,
-            pairsPromise // Add pairsPromise to parallel execution
+            pairsPromise, // Add pairsPromise to parallel execution
+            goplusPromise // Add goplusPromise to parallel execution
         ];
 
         logger.info('Initiating parallel API calls...');
@@ -130,10 +161,21 @@ export class TokenService {
             callsResponse,
             kolTradeResponse,
             narrativeResponse,
-            pairsData
+            pairsData,
+            goplusResponse
         ] = await Promise.all(apiCalls);
 
         logger.info('All API calls resolved.');
+
+        // Extract GoPlus security data (lowercase contract address in result)
+        let goplusData: any = null;
+        if (goplusResponse && goplusResponse.code === 1 && goplusResponse.result) {
+            const lowerCaseAddress = contractAddress.toLowerCase();
+            goplusData = goplusResponse.result[lowerCaseAddress];
+            logger.info(`GoPlus security fetched for ${contractAddress}: is_honeypot=${goplusData?.is_honeypot}`);
+        } else {
+            logger.warn(`GoPlus Labs API did not return valid data for ${contractAddress}`);
+        }
 
         // --- NEW: Honeypot IsHoneypot API Call (sequential, depends on pairsData) ---
         let honeypotData: any = null;
@@ -196,7 +238,8 @@ export class TokenService {
             community: enrichedCommunity,
             calls: callsResponse,
             pairs: pairsData,
-            honeypot: honeypotData
+            honeypot: honeypotData,
+            goplusSecurity: goplusData
         };
 
         // 7. --- NEW: SAVE AGGREGATED DATA TO QUESTDB ---
