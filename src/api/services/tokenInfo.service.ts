@@ -24,6 +24,16 @@ class tokenInfoServiceApi {
             alertChange: tokenInfo.community.alertChanceInfo?.alertChances,
             kolCalls: tokenInfo.community.kolCallInfo?.kolCalls,
             communityAttention: tokenInfo.community.communityAttentionInfo?.communityAttentions,
+            safetyChecklist: {
+                isWarning: tokenInfo.honeypot?.simulationResult?.sellTax >= 50,
+                airDropSummary: tokenInfo.honeypot?.airdropSummary,
+                summery: tokenInfo.honeypot?.summary,
+                isHoneyPot: tokenInfo.honeypot?.honeypotResult?.isHoneypot,
+                simulationResult: tokenInfo.honeypot?.simulationResult,
+                holderAnalysis: tokenInfo.honeypot?.holderAnalysis,
+
+
+            },
         }
         console.log(tokenInfo, "result");
         return result;
