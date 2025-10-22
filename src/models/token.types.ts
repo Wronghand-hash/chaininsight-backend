@@ -30,7 +30,3 @@ export interface PriceResponse {
   volume: number;
   marketCap: number;
 }
-
-export interface HistoricalPrice extends Omit<PriceResponse, 'priceChange'> {
-  // priceChange omitted; compute separately
-}

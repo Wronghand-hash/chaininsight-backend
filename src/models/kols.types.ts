@@ -7,6 +7,6 @@ export interface KolTradeStat {
 export interface KolLeaderboardResponse {
     buyerCount: number;
     sellerCount: number;
-    clearCount?: number;  // From docs: full sells
+    clearCount?: number;
     tradeStatList: KolTradeStat[];
 }

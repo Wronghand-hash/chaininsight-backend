@@ -1,11 +1,9 @@
-// TokenService.ts (Updated with Honeypot API integration and GoPlus Labs security integration)
-
 import { config } from '../utils/config';
 import { chainInsightService } from './chainInsightService';
 import { questdbService } from './questDbService';
 
 type Chain = 'BSC' | 'ETH' | 'SOL';
-type ChainId = 1 | 56 | 137; // ETH:1, BSC:56, Polygon:137 (SOL not directly supported by Honeypot; adjust as needed)
+type ChainId = 1 | 56
 type RequestOptions = {
     headers: {
         'API-KEY': string;
@@ -16,23 +14,18 @@ type TokenInfoResponse = {
     narrative: any;
     community: any;
     calls: any;
-    pairs?: any[]; // NEW: Array of pair objects from Honeypot API
-    honeypot?: any; // NEW: Honeypot analysis result
-    goplusSecurity?: any; // NEW: GoPlus Labs security analysis result
+    pairs?: any[];
+    honeypot?: any;
+    goplusSecurity?: any;
 };
 const logger = { info: console.log, warn: console.warn };
 
-/**
- * The API-KEY is extracted directly from the provided config.
- */
 const API_KEY = config.apiKey;
 
-// Chain to ChainID mapping for Honeypot API (SOL omitted; fallback or error if unsupported)
 const getChainId = (chain: Chain): ChainId => {
     switch (chain) {
         case 'BSC': return 56;
         case 'ETH': return 1;
-        // case 'SOL': return undefined; // Honeypot doesn't support SOL; handle as needed
         default: throw new Error(`Unsupported chain: ${chain}`);
     }
 };
@@ -41,11 +34,9 @@ export class TokenService {
     /**
      * Fetches complete token information by making parallel, direct API calls 
      * to the ChainInsight service, ensuring the required API-KEY is included in headers.
-     * * NOTE: We are using the specific, correct full URLs from config.baseUrls 
-     * * instead of relying on the potentially incorrect config.ENDPOINTS.
-     * * NEW: Added parallel fetch to Honeypot API for liquidity pairs data.
-     * * NEW: Added sequential fetch to Honeypot IsHoneypot API using the primary pair from GetPairs.
-     * * NEW: Added parallel fetch to GoPlus Labs API for token security analysis.
+     * Added parallel fetch to Honeypot API for liquidity pairs data.
+     * Added sequential fetch to Honeypot IsHoneypot API using the primary pair from GetPairs.
+     * Added parallel fetch to GoPlus Labs API for token security analysis.
      */
     async getTokenInfo(contractAddress: string, chain: Chain = 'BSC'): Promise<TokenInfoResponse> {
         logger.info('Starting token info fetch for', contractAddress, 'on', chain);
@@ -69,12 +60,6 @@ export class TokenService {
 
         // Helper function to log and make the POST request
         const createLoggedPost = (fullUrl: string, serviceName: string, body: typeof postBody, options: RequestOptions) => {
-            logger.info(`[DEBUG] Preparing POST Request for ${serviceName}:`);
-            logger.info(` 	URL: ${fullUrl}`);
-            logger.info(` 	Body: ${JSON.stringify(body)}`);
-            logger.info(` 	Headers:`, options.headers);
-
-            // The chainInsightService.post must accept the full URL here
             return chainInsightService.post(fullUrl, body);
         };
 
@@ -82,7 +67,6 @@ export class TokenService {
         const communityPromise = createLoggedPost(config.baseUrls.community, 'COMMUNITY', postBody, requestOptions);
         const callsPromise = createLoggedPost(config.baseUrls.callChannel, 'CALL_CHANNEL', postBody, requestOptions);
 
-        // NOTE: KOL_TRADES is named kolAnalysis in config.baseUrls
         const kolTradePromise = createLoggedPost(config.baseUrls.kolAnalysis, 'KOL_TRADES', postBody, requestOptions);
 
         const narrativePromise = createLoggedPost(config.baseUrls.narration, 'NARRATION', postBody, requestOptions);
@@ -90,9 +74,6 @@ export class TokenService {
         // --- NEW: Honeypot API Call for Pairs/Liquidity ---
         const chainId = getChainId(chain);
         const pairsUrl = `https://api.honeypot.is/v1/GetPairs?address=${contractAddress}&chainID=${chainId}`;
-        logger.info(`[DEBUG] Preparing GET Request for HONEYPOT PAIRS:`);
-        logger.info(` 	URL: ${pairsUrl}`);
-
         const pairsPromise = fetch(pairsUrl, {
             credentials: 'omit',
             headers: {
@@ -118,9 +99,6 @@ export class TokenService {
 
         // --- NEW: GoPlus Labs API Call for Token Security ---
         const goplusUrl = `https://open-api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${contractAddress}`;
-        logger.info(`[DEBUG] Preparing GET Request for GOPLUS SECURITY:`);
-        logger.info(` 	URL: ${goplusUrl}`);
-
         const goplusPromise = fetch(goplusUrl, {
             credentials: 'omit',
             headers: {
@@ -149,8 +127,8 @@ export class TokenService {
             callsPromise,
             kolTradePromise,
             narrativePromise,
-            pairsPromise, // Add pairsPromise to parallel execution
-            goplusPromise // Add goplusPromise to parallel execution
+            pairsPromise,
+            goplusPromise
         ];
 
         logger.info('Initiating parallel API calls...');
@@ -177,16 +155,13 @@ export class TokenService {
             logger.warn(`GoPlus Labs API did not return valid data for ${contractAddress}`);
         }
 
-        // --- NEW: Honeypot IsHoneypot API Call (sequential, depends on pairsData) ---
+        // Honeypot IsHoneypot API Call (sequential, depends on pairsData)
         let honeypotData: any = null;
         if (pairsData && Array.isArray(pairsData) && pairsData.length > 0) {
             // Use the first pair as primary based on the actual response structure
             const primaryPairAddress = pairsData[0]?.Pair?.Address;
             if (primaryPairAddress) {
                 const honeypotUrl = `https://api.honeypot.is/v2/IsHoneypot?address=${contractAddress}&pair=${primaryPairAddress}&chainID=${chainId}`;
-                logger.info(`[DEBUG] Preparing GET Request for HONEYPOT ISHONEYPOT:`);
-                logger.info(` 	URL: ${honeypotUrl}`);
-
                 try {
                     const honeypotResponse = await fetch(honeypotUrl, {
                         credentials: 'omit',
@@ -219,7 +194,6 @@ export class TokenService {
         } else {
             logger.warn(`No pairs data available for Honeypot analysis on ${contractAddress}`);
         }
-        // --- END NEW SECTION ---
 
         // 5. Enrich Community Data with KOL Trade Data
         const enrichedCommunity = {
@@ -242,16 +216,13 @@ export class TokenService {
             goplusSecurity: goplusData
         };
 
-        // 7. --- NEW: SAVE AGGREGATED DATA TO QUESTDB ---
+        // 7. SAVE AGGREGATED DATA TO QUESTDB
         try {
             await questdbService.saveTokenMetrics(contractAddress, chain, fullData);
             logger.info(`Token metrics successfully saved to QuestDB for ${contractAddress}`);
         } catch (dbError) {
             logger.warn(`Failed to save token metrics to QuestDB for ${contractAddress}:`, dbError);
-            // Non-fatal error: continue execution even if saving to DB fails
         }
-        // --- END NEW SECTION ---
-
 
         logger.info('Token info successfully aggregated.');
         return fullData;
