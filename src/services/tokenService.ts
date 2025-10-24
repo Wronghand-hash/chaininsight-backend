@@ -113,9 +113,7 @@ export class TokenService {
         }).then(async (res) => {
             if (!res.ok) throw new Error(`Dexscreener error: ${res.status}`);
             const json = await res.json();
-            try {
-                logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(json)}`);
-            } catch {}
+
             return json;
         }).catch((err) => {
             logger.warn(`Dexscreener fetch failed for ${contractAddress}:`, err);
