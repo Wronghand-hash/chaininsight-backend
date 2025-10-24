@@ -32,7 +32,7 @@ class TokenMetricsDexscreenerPoller {
       'UTC' // timeZone
     );
 
-    logger.info('TokenMetricsDexscreenerPoller started as cron job (every 5 minutes)');
+    logger.info('TokenMetricsDexscreenerPoller started as cron job (every 1 minutes)');
   }
 
   stop() {
