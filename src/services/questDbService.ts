@@ -27,8 +27,8 @@ export class QuestDBService {
   }
 
   /**
-   * Saves Dexscreener metrics (price_usd, market_cap, fdv, volume_5m, volume_24h) and raw payload
-   * into token_metrics, keyed by (contract, chain). Logs full payload at info level.
+   * Saves Dexscreener metrics (price_usd, market_cap, fdv, volume_5m, volume_24h) into token_metrics,
+   * keyed by (contract, chain). Logs full payload at info level.
    */
   async saveDexscreenerMetrics(contractAddress: string, chain: Chain, dexscreenerPayload: any): Promise<void> {
     if (!this.initialized) {
@@ -37,7 +37,7 @@ export class QuestDBService {
 
     try {
       logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(dexscreenerPayload)}`);
-    } catch {}
+    } catch { }
 
     const pair = dexscreenerPayload?.pairs?.[0] || null;
     const priceUsd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
@@ -168,13 +168,13 @@ export class QuestDBService {
           fdv DOUBLE,
           volume_5m DOUBLE,
           volume_24h DOUBLE,
-          dexscreener_raw STRING,
           call_count INT,
           kol_calls_count INT,
           mention_user_count INT,
           calls_data STRING,
           community_data STRING,
           narrative_data STRING,
+          title STRING,
           updated_at TIMESTAMP
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       }
@@ -202,13 +202,13 @@ export class QuestDBService {
       { name: 'fdv', type: 'DOUBLE' },
       { name: 'volume_5m', type: 'DOUBLE' },
       { name: 'volume_24h', type: 'DOUBLE' },
-      { name: 'dexscreener_raw', type: 'STRING' },
       { name: 'call_count', type: 'INT' },
       { name: 'kol_calls_count', type: 'INT' },
       { name: 'mention_user_count', type: 'INT' },
       { name: 'calls_data', type: 'STRING' },
       { name: 'community_data', type: 'STRING' },
       { name: 'narrative_data', type: 'STRING' },
+      { name: 'title', type: 'STRING' },
       { name: 'updated_at', type: 'TIMESTAMP' },
     ];
     for (const col of adds) {
@@ -247,13 +247,13 @@ export class QuestDBService {
           const fdv = row.fdv != null ? Number(row.fdv) : null;
           const volume5m = row.volume_5m != null ? Number(row.volume_5m) : null;
           const volume24h = row.volume_24h != null ? Number(row.volume_24h) : null;
-          const dexscreenerRaw = row.dexscreener_raw != null ? JSON.stringify(row.dexscreener_raw) : null;
+          const title = row.title != null ? String(row.title) : null;
           const hasPriceUsd = Object.prototype.hasOwnProperty.call(row, 'price_usd');
           const hasMarketCap = Object.prototype.hasOwnProperty.call(row, 'market_cap');
           const hasFdv = Object.prototype.hasOwnProperty.call(row, 'fdv');
           const hasVolume5m = Object.prototype.hasOwnProperty.call(row, 'volume_5m');
           const hasVolume24h = Object.prototype.hasOwnProperty.call(row, 'volume_24h');
-          const hasDexRaw = Object.prototype.hasOwnProperty.call(row, 'dexscreener_raw');
+          const hasTitle = Object.prototype.hasOwnProperty.call(row, 'title');
           const callCount = Number(row.call_count || 0);
           const kolCallsCount = Number(row.kol_calls_count || 0);
           const mentionUserCount = Number(row.mention_user_count || 0);
@@ -276,7 +276,7 @@ export class QuestDBService {
             if (hasFdv) setParts.push(`fdv = ${nullable(fdv)}`);
             if (hasVolume5m) setParts.push(`volume_5m = ${nullable(volume5m)}`);
             if (hasVolume24h) setParts.push(`volume_24h = ${nullable(volume24h)}`);
-            if (hasDexRaw) setParts.push(`dexscreener_raw = ${dexscreenerRaw == null ? 'null' : `'${esc(dexscreenerRaw)}'`}`);
+            if (hasTitle) setParts.push(`title = ${title == null ? 'null' : `'${esc(title)}'`}`);
             // Always update these aggregate fields
             setParts.push(
               `call_count = ${callCount}`,
@@ -292,8 +292,8 @@ export class QuestDBService {
           } else {
             // First write: INSERT with binds (works over PG wire)
             const insertSql = `INSERT INTO token_metrics (
-              timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h, dexscreener_raw,
-              call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, updated_at
+              timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h,
+              call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, title, updated_at
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9,
               $10, $11, $12, $13, $14, $15, $16
@@ -307,13 +307,13 @@ export class QuestDBService {
               fdv,
               volume5m,
               volume24h,
-              dexscreenerRaw,
               callCount,
               kolCallsCount,
               mentionUserCount,
               callsData,
               communityData,
               narrativeData,
+              title,
               nowIso,
             ]);
           }
@@ -444,7 +444,8 @@ export class QuestDBService {
       mention_user_count: kolCallInfo?.mentionUserCount || 0,
       calls_data: data.calls || {},
       community_data: data.community || {},
-      narrative_data: data.narrative || {}
+      narrative_data: data.narrative || {},
+      title: data.narrative?.symbol ?? null,
     };
 
     logger.info(`💾 Saving token metrics for ${contractAddress} (${chain})`);
