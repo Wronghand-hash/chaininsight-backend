@@ -65,7 +65,7 @@ class TokenMetricsDexscreenerPoller {
       logger.info(`Polling Dexscreener for ${items.length} contracts from token_metrics`);
 
       const uniqueContracts = Array.from(new Set(items.map(i => i.contract)));
-      const batches = this.chunk(uniqueContracts, 20); // Dexscreener supports comma-separated addresses; keep batches modest
+      const batches = this.chunk(uniqueContracts, 30);
 
       for (const batch of batches) {
         const batchUrl = `${config.baseUrls.dexscreener}${batch.join(',')}`;
