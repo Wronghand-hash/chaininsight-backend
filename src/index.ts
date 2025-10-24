@@ -2,12 +2,13 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
 import { logger } from './utils/logger';
 import { questdbService } from './services/questDbService';
 import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
 import kolsLeaderboardRouter from './api/router/leaderboard.route';
 import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
-// Note: Routes/controllers omitted per request; add back as needed
+import swaggerSpec from './config/swagger';
 
 dotenv.config();
 
@@ -18,6 +19,13 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'ChainInsight API Documentation',
+}));
 
 app.use('/api/v1/kol', kolsLeaderboardRouter);
 
