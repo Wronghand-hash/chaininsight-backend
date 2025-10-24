@@ -1,11 +1,11 @@
 import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
 import { config } from '../utils/config';
+import { CronJob } from 'cron';
 
 class TokenMetricsDexscreenerPoller {
-  private timer: NodeJS.Timeout | null = null;
+  private cronJob: CronJob<() => Promise<void>, () => void> | null = null;
   private running = false;
-  private intervalMs = 60_000;
 
   private chunk<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
@@ -13,26 +13,38 @@ class TokenMetricsDexscreenerPoller {
     return out;
   }
 
-  async start(intervalMs?: number) {
+  async start() {
     if (this.running) return;
-    if (intervalMs && intervalMs > 0) this.intervalMs = intervalMs;
     await questdbService.init();
     this.running = true;
-    this.tick();
-    this.timer = setInterval(() => this.tick(), this.intervalMs);
-    logger.info(`TokenMetricsDexscreenerPoller started, interval=${this.intervalMs}ms`);
+
+    this.cronJob = new CronJob(
+      '*/1 * * * *', // Every 5 minutes
+      async () => {
+        await this.fetchTokenDexInfo();
+      },
+      () => {
+        this.running = false;
+        logger.info('TokenMetricsDexscreenerPoller cron job completed (stopped)');
+      },
+      true, // Start immediately
+      'UTC' // timeZone
+    );
+
+    logger.info('TokenMetricsDexscreenerPoller started as cron job (every 5 minutes)');
   }
 
   stop() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
+    if (this.cronJob) {
+      this.cronJob.stop();
+      this.cronJob = null;
     }
     this.running = false;
     logger.info('TokenMetricsDexscreenerPoller stopped');
   }
 
-  private async tick() {
+  private async fetchTokenDexInfo() {
+    if (!this.running) return;
     try {
       const res = await questdbService.query(
         "SELECT contract, chain, max(updated_at) AS updated_at FROM token_metrics GROUP BY contract, chain ORDER BY updated_at DESC LIMIT 200;"
@@ -177,7 +189,7 @@ class TokenMetricsDexscreenerPoller {
         }
       }
     } catch (e) {
-      logger.warn('TokenMetricsDexscreenerPoller tick failed', e as any);
+      logger.warn('TokenMetricsDexscreenerPoller fetchTokenDexInfo failed', e as any);
     }
   }
 }

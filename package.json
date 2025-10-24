@@ -36,6 +36,7 @@
     "zod": "^4.1.12"
   },
   "dependencies": {
+    "cron": "^4.3.3",
     "kafkajs": "^2.2.4",
     "winston": "^3.18.3"
   }
