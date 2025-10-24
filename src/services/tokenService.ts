@@ -108,13 +108,28 @@ export class TokenService {
             return { code: 0, message: 'Error', result: {} }; // Graceful fallback: empty result on failure
         });
 
+        const dexscreenerPromise = fetch(`${config.baseUrls.dexscreener}${contractAddress}`, {
+            method: 'GET'
+        }).then(async (res) => {
+            if (!res.ok) throw new Error(`Dexscreener error: ${res.status}`);
+            const json = await res.json();
+            try {
+                logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(json)}`);
+            } catch {}
+            return json;
+        }).catch((err) => {
+            logger.warn(`Dexscreener fetch failed for ${contractAddress}:`, err);
+            return null;
+        });
+
         const apiCalls: Promise<any>[] = [
             communityPromise,
             callsPromise,
             kolTradePromise,
             narrativePromise,
             pairsPromise,
-            goplusPromise
+            goplusPromise,
+            dexscreenerPromise
         ];
 
         logger.info('Initiating parallel API calls...');
@@ -126,7 +141,8 @@ export class TokenService {
             kolTradeResponse,
             narrativeResponse,
             pairsData,
-            goplusResponse
+            goplusResponse,
+            dexscreenerResponse
         ] = await Promise.all(apiCalls);
 
         logger.info('All API calls resolved.');
@@ -139,6 +155,15 @@ export class TokenService {
             logger.info(`GoPlus security fetched for ${contractAddress}: is_honeypot=${goplusData?.is_honeypot}`);
         } else {
             logger.warn(`GoPlus Labs API did not return valid data for ${contractAddress}`);
+        }
+
+        // Persist Dexscreener metrics and raw payload (price, FDV, volumes)
+        if (dexscreenerResponse) {
+            try {
+                await questdbService.saveDexscreenerMetrics(contractAddress, chain, dexscreenerResponse);
+            } catch (err) {
+                logger.warn(`Failed to persist Dexscreener metrics for ${contractAddress}`, err);
+            }
         }
 
         // Honeypot IsHoneypot API Call (sequential, depends on pairsData)

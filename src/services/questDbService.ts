@@ -26,6 +26,42 @@ export class QuestDBService {
     });
   }
 
+  /**
+   * Saves Dexscreener metrics (price_usd, market_cap, fdv, volume_5m, volume_24h) and raw payload
+   * into token_metrics, keyed by (contract, chain). Logs full payload at info level.
+   */
+  async saveDexscreenerMetrics(contractAddress: string, chain: Chain, dexscreenerPayload: any): Promise<void> {
+    if (!this.initialized) {
+      await this.init();
+    }
+
+    try {
+      logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(dexscreenerPayload)}`);
+    } catch {}
+
+    const pair = dexscreenerPayload?.pairs?.[0] || null;
+    const priceUsd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
+    const marketCap = pair?.marketCap != null ? Number(pair.marketCap) : null;
+    const fdv = pair?.fdv != null ? Number(pair.fdv) : null;
+    const volume5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
+    const volume24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
+
+    logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${priceUsd} marketCap=${marketCap} fdv=${fdv} vol5m=${volume5m} vol24h=${volume24h}`);
+
+    const row = {
+      timestamp: new Date().toISOString(),
+      contract: (contractAddress || '').toLowerCase(),
+      chain: (chain || 'BSC').toUpperCase(),
+      price_usd: priceUsd,
+      market_cap: marketCap,
+      fdv,
+      volume_5m: volume5m,
+      volume_24h: volume24h,
+    };
+
+    await this.insertBatch('token_metrics', [row]);
+  }
+
   async init(): Promise<void> {
     if (this.initialized) {
       if (config.questdb.diagnosticsVerbose) {
@@ -127,6 +163,12 @@ export class QuestDBService {
           timestamp TIMESTAMP,
           contract SYMBOL,
           chain SYMBOL,
+          price_usd DOUBLE,
+          market_cap DOUBLE,
+          fdv DOUBLE,
+          volume_5m DOUBLE,
+          volume_24h DOUBLE,
+          dexscreener_raw STRING,
           call_count INT,
           kol_calls_count INT,
           mention_user_count INT,
@@ -147,7 +189,39 @@ export class QuestDBService {
       }
     }
 
+    // Ensure token_metrics has the new columns if table existed before
+    await this.ensureTokenMetricsColumns();
+
     logger.info('✅ QuestDB tables created or verified');
+  }
+
+  private async ensureTokenMetricsColumns(): Promise<void> {
+    const adds: Array<{ name: string; type: string }> = [
+      { name: 'price_usd', type: 'DOUBLE' },
+      { name: 'market_cap', type: 'DOUBLE' },
+      { name: 'fdv', type: 'DOUBLE' },
+      { name: 'volume_5m', type: 'DOUBLE' },
+      { name: 'volume_24h', type: 'DOUBLE' },
+      { name: 'dexscreener_raw', type: 'STRING' },
+      { name: 'call_count', type: 'INT' },
+      { name: 'kol_calls_count', type: 'INT' },
+      { name: 'mention_user_count', type: 'INT' },
+      { name: 'calls_data', type: 'STRING' },
+      { name: 'community_data', type: 'STRING' },
+      { name: 'narrative_data', type: 'STRING' },
+      { name: 'updated_at', type: 'TIMESTAMP' },
+    ];
+    for (const col of adds) {
+      try {
+        await this.pgClient.query(`ALTER TABLE token_metrics ADD COLUMN ${col.name} ${col.type};`);
+        logger.debug(`✅ token_metrics column added: ${col.name}`);
+      } catch (e) {
+        // Likely already exists; keep silent unless diagnosticsVerbose
+        if (config.questdb.diagnosticsVerbose) {
+          logger.debug(`ℹ️ token_metrics column ensure skip: ${col.name}`);
+        }
+      }
+    }
   }
 
   private ensureInit(): void {
@@ -168,6 +242,18 @@ export class QuestDBService {
           const ts = String(row.timestamp ?? nowIso);
           const contract = String(row.contract || '');
           const chain = String(row.chain || 'BSC');
+          const priceUsd = row.price_usd != null ? Number(row.price_usd) : null;
+          const marketCap = row.market_cap != null ? Number(row.market_cap) : null;
+          const fdv = row.fdv != null ? Number(row.fdv) : null;
+          const volume5m = row.volume_5m != null ? Number(row.volume_5m) : null;
+          const volume24h = row.volume_24h != null ? Number(row.volume_24h) : null;
+          const dexscreenerRaw = row.dexscreener_raw != null ? JSON.stringify(row.dexscreener_raw) : null;
+          const hasPriceUsd = Object.prototype.hasOwnProperty.call(row, 'price_usd');
+          const hasMarketCap = Object.prototype.hasOwnProperty.call(row, 'market_cap');
+          const hasFdv = Object.prototype.hasOwnProperty.call(row, 'fdv');
+          const hasVolume5m = Object.prototype.hasOwnProperty.call(row, 'volume_5m');
+          const hasVolume24h = Object.prototype.hasOwnProperty.call(row, 'volume_24h');
+          const hasDexRaw = Object.prototype.hasOwnProperty.call(row, 'dexscreener_raw');
           const callCount = Number(row.call_count || 0);
           const kolCallsCount = Number(row.kol_calls_count || 0);
           const mentionUserCount = Number(row.mention_user_count || 0);
@@ -183,28 +269,45 @@ export class QuestDBService {
           if (exists) {
             // Perform UPDATE without bind variables to avoid QuestDB PG limitation
             const esc = (s: string) => s.replace(/'/g, "''");
-            const updateSql = `UPDATE token_metrics SET
-              call_count = ${callCount},
-              kol_calls_count = ${kolCallsCount},
-              mention_user_count = ${mentionUserCount},
-              calls_data = '${esc(callsData)}',
-              community_data = '${esc(communityData)}',
-              narrative_data = '${esc(narrativeData)}',
-              updated_at = '${esc(nowIso)}'
-            WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
+            const nullable = (n: number | null) => (n == null || Number.isNaN(n) ? 'NULL' : String(n));
+            const setParts: string[] = [];
+            if (hasPriceUsd) setParts.push(`price_usd = ${nullable(priceUsd)}`);
+            if (hasMarketCap) setParts.push(`market_cap = ${nullable(marketCap)}`);
+            if (hasFdv) setParts.push(`fdv = ${nullable(fdv)}`);
+            if (hasVolume5m) setParts.push(`volume_5m = ${nullable(volume5m)}`);
+            if (hasVolume24h) setParts.push(`volume_24h = ${nullable(volume24h)}`);
+            if (hasDexRaw) setParts.push(`dexscreener_raw = ${dexscreenerRaw == null ? 'null' : `'${esc(dexscreenerRaw)}'`}`);
+            // Always update these aggregate fields
+            setParts.push(
+              `call_count = ${callCount}`,
+              `kol_calls_count = ${kolCallsCount}`,
+              `mention_user_count = ${mentionUserCount}`,
+              `calls_data = '${esc(callsData)}'`,
+              `community_data = '${esc(communityData)}'`,
+              `narrative_data = '${esc(narrativeData)}'`,
+              `updated_at = '${esc(nowIso)}'`
+            );
+            const updateSql = `UPDATE token_metrics SET ${setParts.join(', ')} WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
             await this.pgClient.query(updateSql);
           } else {
             // First write: INSERT with binds (works over PG wire)
             const insertSql = `INSERT INTO token_metrics (
-              timestamp, contract, chain, call_count, kol_calls_count,
-              mention_user_count, calls_data, community_data, narrative_data, updated_at
+              timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h, dexscreener_raw,
+              call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, updated_at
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+              $1, $2, $3, $4, $5, $6, $7, $8, $9,
+              $10, $11, $12, $13, $14, $15, $16
             );`;
             await this.pgClient.query(insertSql, [
               ts,
               contract,
               chain,
+              priceUsd,
+              marketCap,
+              fdv,
+              volume5m,
+              volume24h,
+              dexscreenerRaw,
               callCount,
               kolCallsCount,
               mentionUserCount,
@@ -272,8 +375,8 @@ export class QuestDBService {
             values = [
               row.timestamp,
               String(row.contract),
-              Number(row.priceUsd),
-              Number(row.volume),
+              row.priceUsd != null ? Number(row.priceUsd) : null,
+              row.volume != null ? Number(row.volume) : null,
               String(row.chain)
             ];
             break;
@@ -335,6 +438,7 @@ export class QuestDBService {
       timestamp: new Date().toISOString(),
       contract: normContract,
       chain: normChain,
+      // Dexscreener metrics may be patched in by a separate call
       call_count: data.calls?.callChannelInfo?.callChannels?.length || 0,
       kol_calls_count: kolCallInfo?.kolCalls?.length || 0,
       mention_user_count: kolCallInfo?.mentionUserCount || 0,
