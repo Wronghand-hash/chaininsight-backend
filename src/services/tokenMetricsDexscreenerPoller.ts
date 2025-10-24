@@ -2,6 +2,7 @@ import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
 import { config } from '../utils/config';
 import { CronJob } from 'cron';
+import { TokenInfoResponse } from '../models/token.types';
 
 class TokenMetricsDexscreenerPoller {
   private cronJob: CronJob<() => Promise<void>, () => void> | null = null;
@@ -175,7 +176,7 @@ class TokenMetricsDexscreenerPoller {
               const filteredPair = { ...selectedPair, info: filteredCtoInfo };
 
               // Always update the DB with latest metrics (includes filtered dexscreener_info)
-              await questdbService.saveDexscreenerMetrics(item.contract, item.chain as any, { pairs: [filteredPair] });
+              await questdbService.saveTokenMetrics(item.contract, item.chain as any, {} as TokenInfoResponse, { pairs: [filteredPair] });
             }
           }
 

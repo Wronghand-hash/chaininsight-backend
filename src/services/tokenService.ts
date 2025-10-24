@@ -155,15 +155,6 @@ export class TokenService {
             logger.warn(`GoPlus Labs API did not return valid data for ${contractAddress}`);
         }
 
-        // Persist Dexscreener metrics and raw payload (price, FDV, volumes)
-        if (dexscreenerResponse) {
-            try {
-                await questdbService.saveDexscreenerMetrics(contractAddress, chain, dexscreenerResponse);
-            } catch (err) {
-                logger.warn(`Failed to persist Dexscreener metrics for ${contractAddress}`, err);
-            }
-        }
-
         // Honeypot IsHoneypot API Call (sequential, depends on pairsData)
         let honeypotData: any = null;
         if (pairsData && Array.isArray(pairsData) && pairsData.length > 0) {
@@ -227,7 +218,7 @@ export class TokenService {
 
         // 7. SAVE AGGREGATED DATA TO QUESTDB
         try {
-            await questdbService.saveTokenMetrics(contractAddress, chain, fullData);
+            await questdbService.saveTokenMetrics(contractAddress, chain, fullData, dexscreenerResponse);
             logger.info(`Token metrics successfully saved to QuestDB for ${contractAddress}`);
         } catch (dbError) {
             logger.warn(`Failed to save token metrics to QuestDB for ${contractAddress}:`, dbError);

@@ -26,44 +26,6 @@ export class QuestDBService {
     });
   }
 
-  /**
-   * Saves Dexscreener metrics (price_usd, market_cap, fdv, volume_5m, volume_24h) into token_metrics,
-   * keyed by (contract, chain). Logs full payload at info level.
-   */
-  async saveDexscreenerMetrics(contractAddress: string, chain: Chain, dexscreenerPayload: any): Promise<void> {
-    if (!this.initialized) {
-      await this.init();
-    }
-
-    try {
-      logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(dexscreenerPayload)}`);
-    } catch { }
-
-    const pair = dexscreenerPayload?.pairs?.[0] || null;
-    const priceUsd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
-    const marketCap = pair?.marketCap != null ? Number(pair.marketCap) : null;
-    const fdv = pair?.fdv != null ? Number(pair.fdv) : null;
-    const volume5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
-    const volume24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
-    const CTO = pair?.info ? JSON.stringify(pair.info) : null;
-
-    logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${priceUsd} marketCap=${marketCap} fdv=${fdv} vol5m=${volume5m} vol24h=${volume24h}`);
-
-    const row = {
-      timestamp: new Date().toISOString(),
-      contract: (contractAddress || '').toLowerCase(),
-      chain: (chain || 'BSC').toUpperCase(),
-      price_usd: priceUsd,
-      market_cap: marketCap,
-      fdv,
-      volume_5m: volume5m,
-      volume_24h: volume24h,
-      CTO,
-    };
-
-    await this.insertBatch('token_metrics', [row]);
-  }
-
   async init(): Promise<void> {
     if (this.initialized) {
       if (config.questdb.diagnosticsVerbose) {
@@ -438,7 +400,7 @@ export class QuestDBService {
   /**
    * Transforms and saves aggregated token info into the token_metrics table.
    */
-  async saveTokenMetrics(contractAddress: string, chain: Chain, data: TokenInfoResponse): Promise<void> {
+  async saveTokenMetrics(contractAddress: string, chain: Chain, data: TokenInfoResponse, dexscreenerPayload?: any): Promise<void> {
     if (!this.initialized) {
       await this.init();
     }
@@ -447,19 +409,58 @@ export class QuestDBService {
     console.log('kolCallInfo', kolCallInfo);
     const normContract = (contractAddress || '').toLowerCase();
     const normChain = (chain || 'BSC').toUpperCase() as Chain;
-    const row = {
-      timestamp: new Date().toISOString(),
+    const now = new Date().toISOString();
+
+    let price_usd: number | null = null;
+    let market_cap: number | null = null;
+    let fdv: number | null = null;
+    let volume_5m: number | null = null;
+    let volume_24h: number | null = null;
+    let cto: string | null = null;
+
+    if (dexscreenerPayload) {
+      try {
+        logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(dexscreenerPayload)}`);
+      } catch { }
+
+      const pair = dexscreenerPayload?.pairs?.[0] || null;
+      price_usd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
+      market_cap = pair?.marketCap != null ? Number(pair.marketCap) : null;
+      fdv = pair?.fdv != null ? Number(pair.fdv) : null;
+      volume_5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
+      volume_24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
+      cto = pair?.info ? JSON.stringify(pair.info) : null;
+
+      logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${price_usd} marketCap=${market_cap} fdv=${fdv} vol5m=${volume_5m} vol24h=${volume_24h}`);
+    }
+
+    const row: Record<string, any> = {
+      timestamp: now,
       contract: normContract,
       chain: normChain,
-      // Dexscreener metrics may be patched in by a separate call
-      call_count: data.calls?.callChannelInfo?.callChannels?.length || 0,
-      kol_calls_count: kolCallInfo?.kolCalls?.length || 0,
-      mention_user_count: kolCallInfo?.mentionUserCount || 0,
-      calls_data: data.calls || {},
-      community_data: data.community || {},
-      narrative_data: data.narrative || {},
-      title: data.narrative?.symbol ?? null,
+      updated_at: now,
     };
+
+    // Always include dexscreener fields if payload provided
+    if (dexscreenerPayload) {
+      row.price_usd = price_usd;
+      row.market_cap = market_cap;
+      row.fdv = fdv;
+      row.volume_5m = volume_5m;
+      row.volume_24h = volume_24h;
+      row.CTO = cto;
+    }
+
+    // Include chaininsight fields only if data has relevant content
+    if (data && (data.calls || data.community || data.narrative)) {
+      row.call_count = data.calls?.callChannelInfo?.callChannels?.length || 0;
+      row.kol_calls_count = kolCallInfo?.kolCalls?.length || 0;
+      row.mention_user_count = kolCallInfo?.mentionUserCount || 0;
+      row.calls_data = data.calls || {};
+      row.community_data = data.community || {};
+      row.narrative_data = data.narrative || {};
+      row.title = data.narrative?.symbol ?? null;
+    }
 
     logger.info(`💾 Saving token metrics for ${contractAddress} (${chain})`);
     await this.insertBatch('token_metrics', [row]);
