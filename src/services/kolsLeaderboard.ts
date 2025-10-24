@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger';
 import type { KolLeaderboardResponse } from '../models/kols.types';
+import { config } from '../utils/config';
 
 export class KolService {
     /**
@@ -7,14 +8,14 @@ export class KolService {
      * via the CabalSpy test-endpoint API.
      */
     async getLeaderboards(contractAddress: string, chain: 'Solana' | 'BSC' = 'Solana'): Promise<KolLeaderboardResponse> {
-        const endpointUrl = `http://148.230.111.181:8080/api/Token/KOL_Leaderboard_bnb?mint=${contractAddress}&api_key=8oeAp5JXNovdMDx7DEJyf8gx1ux62lXRFX2O035m8jk`;
+        const endpointUrl = `${config.baseUrls.cabalSpy}/api/Token/KOL_Leaderboard_bnb?mint=${contractAddress}&api_key=${config.cabalSpyApiKey}`;
 
         const res = await fetch("https://apidashboard.cabalspy.xyz/test-endpoint", {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
             body: new URLSearchParams({
                 endpoint_url: endpointUrl,
-                api_key: "8oeAp5JXNovdMDx7DEJyf8gx1ux62lXRFX2O035m8jk",
+                api_key: config.cabalSpyApiKey,
             }),
         });
 

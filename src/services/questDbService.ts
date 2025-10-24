@@ -3,15 +3,11 @@ import { Client } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import type { QueryResult, TableRow } from '../models/db.types';
+import { TokenInfoResponse } from '../models/token.types';
 
 // Supported chains
 type Chain = 'BSC' | 'ETH' | 'SOL';
 
-type TokenInfoResponse = {
-  narrative: any;
-  community: any;
-  calls: any;
-};
 
 export class QuestDBService {
   private sender?: Sender;

@@ -1,23 +1,17 @@
+import { TokenInfoResponse } from '../models/token.types';
 import { config } from '../utils/config';
 import { chainInsightService } from './chainInsightService';
 import { questdbService } from './questDbService';
 
-type Chain = 'BSC' | 'ETH' | 'SOL';
-type ChainId = 1 | 56
+type Chain = 'BSC'
+type ChainId = 56
 type RequestOptions = {
     headers: {
         'API-KEY': string;
         'Content-Type': string;
     }
 };
-type TokenInfoResponse = {
-    narrative: any;
-    community: any;
-    calls: any;
-    pairs?: any[];
-    honeypot?: any;
-    goplusSecurity?: any;
-};
+
 const logger = { info: console.log, warn: console.warn };
 
 const API_KEY = config.apiKey;
@@ -25,19 +19,11 @@ const API_KEY = config.apiKey;
 const getChainId = (chain: Chain): ChainId => {
     switch (chain) {
         case 'BSC': return 56;
-        case 'ETH': return 1;
         default: throw new Error(`Unsupported chain: ${chain}`);
     }
 };
 
 export class TokenService {
-    /**
-     * Fetches complete token information by making parallel, direct API calls 
-     * to the ChainInsight service, ensuring the required API-KEY is included in headers.
-     * Added parallel fetch to Honeypot API for liquidity pairs data.
-     * Added sequential fetch to Honeypot IsHoneypot API using the primary pair from GetPairs.
-     * Added parallel fetch to GoPlus Labs API for token security analysis.
-     */
     async getTokenInfo(contractAddress: string, chain: Chain = 'BSC'): Promise<TokenInfoResponse> {
         logger.info('Starting token info fetch for', contractAddress, 'on', chain);
 

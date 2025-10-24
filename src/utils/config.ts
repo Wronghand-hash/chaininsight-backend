@@ -4,6 +4,7 @@ dotenv.config();
 export const config = {
   // Single key for ALL services (including CabalSpy authentication)
   apiKey: process.env.CHAININSIGHT_API_KEY || '',
+  cabalSpyApiKey: process.env.CABALSPY_API_KEY || '',
 
   questdb: {
     host: process.env.QUESTDB_HOST || 'localhost',

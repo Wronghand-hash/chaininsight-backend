@@ -18,7 +18,9 @@ class ChainInsightService {
 
   async post(endpoint: string, data: any) {
     try {
+      console.log('ChainInsight request', endpoint, data);
       const response = await this.client.post(endpoint, data);
+      console.log('ChainInsight response', response.data);
       if (response.data.code !== 0) {
         throw new Error(`ChainInsight API error: ${response.data.msg || 'Unknown error'}`);
       }

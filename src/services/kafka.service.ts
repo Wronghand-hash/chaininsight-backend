@@ -1,10 +1,14 @@
 import { Kafka, Consumer, EachMessagePayload } from 'kafkajs';
 import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
+import dotenv from 'dotenv';
+dotenv.config();
+
+const kafkaBrokerUrl = process.env.KAFKA_BROKER_URL;
 
 const kafka = new Kafka({
     clientId: 'chaininsight-consumer',
-    brokers: ['43.134.238.235:32777']
+    brokers: [kafkaBrokerUrl!]
 });
 
 const consumer: Consumer = kafka.consumer({
