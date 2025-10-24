@@ -6,6 +6,7 @@ import { logger } from './utils/logger';
 import { questdbService } from './services/questDbService';
 import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
 import kolsLeaderboardRouter from './api/router/leaderboard.route';
+import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
 // Note: Routes/controllers omitted per request; add back as needed
 
 dotenv.config();
@@ -35,6 +36,7 @@ app.use((err: Error, req: any, res: any, next: any) => {
     await questdbService.init();
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
+    // await tokenMetricsDexscreenerPoller.start();
     app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
     });
@@ -48,6 +50,7 @@ app.use((err: Error, req: any, res: any, next: any) => {
 process.on('SIGTERM', async () => {
   logger.info('Shutting down...');
   await kafkaService.disconnect();  // NEW: Disconnect Kafka
+  tokenMetricsDexscreenerPoller.stop();
   await questdbService.close();
   process.exit(0);
 });
