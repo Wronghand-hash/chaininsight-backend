@@ -254,6 +254,12 @@ export class QuestDBService {
           const hasVolume5m = Object.prototype.hasOwnProperty.call(row, 'volume_5m');
           const hasVolume24h = Object.prototype.hasOwnProperty.call(row, 'volume_24h');
           const hasTitle = Object.prototype.hasOwnProperty.call(row, 'title');
+          const hasCallCount = Object.prototype.hasOwnProperty.call(row, 'call_count');
+          const hasKolCallsCount = Object.prototype.hasOwnProperty.call(row, 'kol_calls_count');
+          const hasMentionUserCount = Object.prototype.hasOwnProperty.call(row, 'mention_user_count');
+          const hasCallsData = Object.prototype.hasOwnProperty.call(row, 'calls_data');
+          const hasCommunityData = Object.prototype.hasOwnProperty.call(row, 'community_data');
+          const hasNarrativeData = Object.prototype.hasOwnProperty.call(row, 'narrative_data');
           const callCount = Number(row.call_count || 0);
           const kolCallsCount = Number(row.kol_calls_count || 0);
           const mentionUserCount = Number(row.mention_user_count || 0);
@@ -277,16 +283,15 @@ export class QuestDBService {
             if (hasVolume5m) setParts.push(`volume_5m = ${nullable(volume5m)}`);
             if (hasVolume24h) setParts.push(`volume_24h = ${nullable(volume24h)}`);
             if (hasTitle) setParts.push(`title = ${title == null ? 'null' : `'${esc(title)}'`}`);
-            // Always update these aggregate fields
-            setParts.push(
-              `call_count = ${callCount}`,
-              `kol_calls_count = ${kolCallsCount}`,
-              `mention_user_count = ${mentionUserCount}`,
-              `calls_data = '${esc(callsData)}'`,
-              `community_data = '${esc(communityData)}'`,
-              `narrative_data = '${esc(narrativeData)}'`,
-              `updated_at = '${esc(nowIso)}'`
-            );
+            // Conditionally update aggregate fields
+            if (hasCallCount) setParts.push(`call_count = ${callCount}`);
+            if (hasKolCallsCount) setParts.push(`kol_calls_count = ${kolCallsCount}`);
+            if (hasMentionUserCount) setParts.push(`mention_user_count = ${mentionUserCount}`);
+            if (hasCallsData) setParts.push(`calls_data = '${esc(callsData)}'`);
+            if (hasCommunityData) setParts.push(`community_data = '${esc(communityData)}'`);
+            if (hasNarrativeData) setParts.push(`narrative_data = '${esc(narrativeData)}'`);
+            // Always update timestamp
+            setParts.push(`updated_at = '${esc(nowIso)}'`);
             const updateSql = `UPDATE token_metrics SET ${setParts.join(', ')} WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
             await this.pgClient.query(updateSql);
           } else {
