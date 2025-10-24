@@ -8,6 +8,7 @@ import { questdbService } from './services/questDbService';
 import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
 import kolsLeaderboardRouter from './api/router/leaderboard.route';
 import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
+import { MigrationRunner } from './db/migrations/migration-runner';
 import swaggerSpec from './config/swagger';
 
 dotenv.config();
@@ -38,10 +39,23 @@ app.use((err: Error, req: any, res: any, next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Init DB and Kafka, then start
+// Run database migrations
+const runMigrations = async () => {
+  try {
+    const migrationRunner = new MigrationRunner();
+    const migrationsApplied = await migrationRunner.runMigrations();
+    logger.info(`Applied ${migrationsApplied} database migrations`);
+  } catch (error) {
+    logger.error('Failed to run database migrations:', error);
+    process.exit(1);
+  }
+};
+
+// Init DB, run migrations, and start the server
 (async () => {
   try {
     await questdbService.init();
+    await runMigrations();
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     await tokenMetricsDexscreenerPoller.start();
