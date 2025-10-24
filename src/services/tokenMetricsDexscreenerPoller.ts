@@ -20,7 +20,7 @@ class TokenMetricsDexscreenerPoller {
     this.running = true;
 
     this.cronJob = new CronJob(
-      '*/1 * * * *', // Every 5 minutes
+      '*/1 * * * *',
       async () => {
         await this.fetchTokenDexInfo();
       },
