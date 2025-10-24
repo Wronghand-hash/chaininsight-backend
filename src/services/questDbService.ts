@@ -45,6 +45,7 @@ export class QuestDBService {
     const fdv = pair?.fdv != null ? Number(pair.fdv) : null;
     const volume5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
     const volume24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
+    const CTO = pair?.info ? JSON.stringify(pair.info) : null;
 
     logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${priceUsd} marketCap=${marketCap} fdv=${fdv} vol5m=${volume5m} vol24h=${volume24h}`);
 
@@ -57,6 +58,7 @@ export class QuestDBService {
       fdv,
       volume_5m: volume5m,
       volume_24h: volume24h,
+      CTO,
     };
 
     await this.insertBatch('token_metrics', [row]);
@@ -175,7 +177,8 @@ export class QuestDBService {
           community_data STRING,
           narrative_data STRING,
           title STRING,
-          updated_at TIMESTAMP
+          updated_at TIMESTAMP,
+          CTO STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       }
     ];
@@ -210,6 +213,7 @@ export class QuestDBService {
       { name: 'narrative_data', type: 'STRING' },
       { name: 'title', type: 'STRING' },
       { name: 'updated_at', type: 'TIMESTAMP' },
+      { name: 'CTO', type: 'STRING' },
     ];
     for (const col of adds) {
       try {
@@ -248,12 +252,14 @@ export class QuestDBService {
           const volume5m = row.volume_5m != null ? Number(row.volume_5m) : null;
           const volume24h = row.volume_24h != null ? Number(row.volume_24h) : null;
           const title = row.title != null ? String(row.title) : null;
+          const CTOStr = row.CTO != null ? String(row.CTO) : null;
           const hasPriceUsd = Object.prototype.hasOwnProperty.call(row, 'price_usd');
           const hasMarketCap = Object.prototype.hasOwnProperty.call(row, 'market_cap');
           const hasFdv = Object.prototype.hasOwnProperty.call(row, 'fdv');
           const hasVolume5m = Object.prototype.hasOwnProperty.call(row, 'volume_5m');
           const hasVolume24h = Object.prototype.hasOwnProperty.call(row, 'volume_24h');
           const hasTitle = Object.prototype.hasOwnProperty.call(row, 'title');
+          const hasCTO = Object.prototype.hasOwnProperty.call(row, 'CTO');
           const hasCallCount = Object.prototype.hasOwnProperty.call(row, 'call_count');
           const hasKolCallsCount = Object.prototype.hasOwnProperty.call(row, 'kol_calls_count');
           const hasMentionUserCount = Object.prototype.hasOwnProperty.call(row, 'mention_user_count');
@@ -283,6 +289,7 @@ export class QuestDBService {
             if (hasVolume5m) setParts.push(`volume_5m = ${nullable(volume5m)}`);
             if (hasVolume24h) setParts.push(`volume_24h = ${nullable(volume24h)}`);
             if (hasTitle) setParts.push(`title = ${title == null ? 'null' : `'${esc(title)}'`}`);
+            if (hasCTO) setParts.push(`CTO = ${CTOStr == null ? 'null' : `'${esc(CTOStr)}'`}`);
             // Conditionally update aggregate fields
             if (hasCallCount) setParts.push(`call_count = ${callCount}`);
             if (hasKolCallsCount) setParts.push(`kol_calls_count = ${kolCallsCount}`);
@@ -298,10 +305,10 @@ export class QuestDBService {
             // First write: INSERT with binds (works over PG wire)
             const insertSql = `INSERT INTO token_metrics (
               timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h,
-              call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, title, updated_at
+              call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, title, updated_at, CTO
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9,
-              $10, $11, $12, $13, $14, $15, $16
+              $10, $11, $12, $13, $14, $15, $16, $17
             );`;
             await this.pgClient.query(insertSql, [
               ts,
@@ -320,6 +327,7 @@ export class QuestDBService {
               narrativeData,
               title,
               nowIso,
+              CTOStr,
             ]);
           }
 

@@ -96,6 +96,19 @@ class TokenMetricsDexscreenerPoller {
               const newVolume5m = selectedPair.volume?.m5 != null ? Number(selectedPair.volume.m5) : null;
               const newVolume24h = selectedPair.volume?.h24 != null ? Number(selectedPair.volume.h24) : null;
 
+              // Extract CTO info from selectedPair
+              const ctoInfo = selectedPair.info || {};
+              const imageUrl = ctoInfo.imageUrl || null;
+              const websites = ctoInfo.websites ? JSON.stringify(ctoInfo.websites) : null;
+              const socials = ctoInfo.socials ? JSON.stringify(ctoInfo.socials) : null;
+
+              // Create filtered CTO info without header and openGraph
+              const filteredCtoInfo = {
+                imageUrl: ctoInfo.imageUrl || null,
+                websites: ctoInfo.websites || [],
+                socials: ctoInfo.socials || []
+              };
+
               if (newMarketCap == null) {
                 logger.warn(`[Dexscreener] Invalid marketCap for ${item.contract} on ${item.chain}`);
                 continue;
@@ -132,14 +145,25 @@ class TokenMetricsDexscreenerPoller {
   ├─ Vol 24h: ${newVolume24h?.toLocaleString() || 'N/A'} USD
   └─ Timestamp: ${new Date().toISOString()}`);
 
+                // Log CTO info details
+                if (ctoInfo && Object.keys(ctoInfo).length > 0) {
+                  logger.info(`[Dexscreener][CTO_INFO] for ${item.contract} (${item.chain})
+  ├─ Image URL: ${imageUrl || 'N/A'}
+  ├─ Websites: ${websites || '[]'}
+  └─ Socials: ${socials || '[]'}`);
+                }
+
                 changesDetected++;
                 totalAbsoluteChange += Math.abs(absoluteChange);
               } else {
                 logger.debug(`[Dexscreener] No significant change for ${item.contract} on ${item.chain} (MC: ${newMarketCap.toLocaleString()})`);
               }
 
-              // Always update the DB with latest metrics
-              await questdbService.saveDexscreenerMetrics(item.contract, item.chain as any, { pairs: [selectedPair] });
+              // Create filtered pair for storage
+              const filteredPair = { ...selectedPair, info: filteredCtoInfo };
+
+              // Always update the DB with latest metrics (includes filtered dexscreener_info)
+              await questdbService.saveDexscreenerMetrics(item.contract, item.chain as any, { pairs: [filteredPair] });
             }
           }
 
