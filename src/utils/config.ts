@@ -6,6 +6,13 @@ export const config = {
   apiKey: process.env.CHAININSIGHT_API_KEY || '',
   cabalSpyApiKey: process.env.CABALSPY_API_KEY || '',
 
+  twitter: {
+    appKey: process.env.TWITTER_APP_KEY || 'uVn9cjGmotYMhqEPYGO1yXsZ2',
+    appSecret: process.env.TWITTER_APP_SECRET || 'nYccvop7mRBW8Glicq0NfAwzTqdbsESEBkz0JSD4sqPsZwJrui',
+    accessToken: process.env.TWITTER_ACCESS_TOKEN || '1769379822684229632-VAvlthRaw6BrruwKsn6uuYR1HGhzAT',
+    accessSecret: process.env.TWITTER_ACCESS_SECRET || 'xyOyEB1SFRR9sqHAKk6UwE0giDaoDfrglCPUtn3X6wt6n',
+  },
+
   questdb: {
     host: process.env.QUESTDB_HOST || 'localhost',
     fastPort: parseInt(process.env.QUESTDB_FAST_PORT || '9009'),

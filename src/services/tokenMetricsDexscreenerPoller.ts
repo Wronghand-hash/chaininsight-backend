@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import { config } from '../utils/config';
 import { CronJob } from 'cron';
 import { TokenInfoResponse } from '../models/token.types';
+import { twitterService } from './twitterService';
 
 class TokenMetricsDexscreenerPoller {
   private cronJob: CronJob<() => Promise<void>, () => void> | null = null;
@@ -17,6 +18,7 @@ class TokenMetricsDexscreenerPoller {
   async start() {
     if (this.running) return;
     await questdbService.init();
+    await twitterService.init();
     this.running = true;
 
     this.cronJob = new CronJob(
@@ -129,45 +131,102 @@ class TokenMetricsDexscreenerPoller {
 
               // Query current values from DB
               const currentRes = await questdbService.query(
-                `SELECT market_cap, price_usd, fdv, volume_5m, volume_24h FROM token_metrics WHERE contract = '${item.contract}' AND chain = '${item.chain}';`
+                `SELECT market_cap, price_usd, fdv, volume_5m, volume_24h, CTO FROM token_metrics WHERE contract = '${item.contract}' AND chain = '${item.chain}';`
               );
               const currentRow = currentRes.rows[0];
-              const oldMarketCap = currentRow ? Number(currentRow[0]) : null;
+              const oldMarketCap = currentRow ? Number(currentRow[0]) || 0 : 0;
+              const oldFdv = currentRow ? Number(currentRow[2]) || 0 : 0;
+              const oldVolume5m = currentRow ? Number(currentRow[3]) || 0 : 0;
+              const oldVolume24h = currentRow ? Number(currentRow[4]) || 0 : 0;
+              const oldCtoInfoStr = currentRow ? currentRow[5] : '{}';
+              const oldCtoInfo = oldCtoInfoStr ? JSON.parse(oldCtoInfoStr) : {};
 
-              // Detect change (with tolerance for floating point)
-              const tolerance = 0.01; // 1 cent USD
-              const hasChange = oldMarketCap == null || Math.abs(newMarketCap - oldMarketCap) > tolerance;
+              // Detect significant changes
+              let hasSignificantChange = false;
+              const changes: string[] = [];
+              let ctoChanged = false;
 
-              if (hasChange) {
-                const absoluteChange = newMarketCap - (oldMarketCap || 0);
-                const percentageChange = oldMarketCap ? ((newMarketCap - oldMarketCap) / oldMarketCap * 100) : null;
-                const changeDirection = absoluteChange > 0 ? 'UP' : (absoluteChange < 0 ? 'DOWN' : 'STABLE');
-                const changeEmoji = absoluteChange > 0 ? '📈' : (absoluteChange < 0 ? '📉' : '➡️');
-                const absChangeFormatted = Math.abs(absoluteChange).toLocaleString();
-                const percChangeFormatted = percentageChange ? percentageChange.toFixed(2) + '%' : 'N/A';
+              // Market Cap large change (2x+, 3x+, or halved)
+              if (oldMarketCap > 0 && newMarketCap > 0) {
+                const ratio = newMarketCap / oldMarketCap;
+                if (ratio >= 2 || ratio <= 0.5) {
+                  const perc = (ratio - 1) * 100;
+                  let mcMsg = `MC ${ratio >= 2 ? '2x+' : 'halved-'} ${newMarketCap.toLocaleString()} (from ${oldMarketCap.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  if (ratio >= 3) mcMsg += ' (3x+)';
+                  changes.push(mcMsg);
+                  hasSignificantChange = true;
+                  totalAbsoluteChange += Math.abs(newMarketCap - oldMarketCap);
+                }
+              }
 
-                logger.info(`${changeEmoji} [Dexscreener][MARKET_CAP_CHANGE] ${changeDirection} 
+              // FDV large change (2x+, 3x+, or halved)
+              if (oldFdv > 0 && newFdv && newFdv > 0) {
+                const ratio = newFdv / oldFdv;
+                if (ratio >= 2 || ratio <= 0.5) {
+                  const perc = (ratio - 1) * 100;
+                  let fdvMsg = `FDV ${ratio >= 2 ? '2x+' : 'halved-'} ${newFdv.toLocaleString()} (from ${oldFdv.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  if (ratio >= 3) fdvMsg += ' (3x+)';
+                  changes.push(fdvMsg);
+                  hasSignificantChange = true;
+                }
+              }
+
+              // Volume 5m large change (2x+ or halved, or new activity)
+              if (oldVolume5m > 0 && newVolume5m && newVolume5m > 0) {
+                const ratio = newVolume5m / oldVolume5m;
+                if (ratio >= 2 || ratio <= 0.5) {
+                  const perc = (ratio - 1) * 100;
+                  let v5Msg = `Vol5m ${ratio >= 2 ? '2x+' : 'halved-'} ${newVolume5m.toLocaleString()} (from ${oldVolume5m.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  changes.push(v5Msg);
+                  hasSignificantChange = true;
+                }
+              } else if (oldVolume5m === 0 && newVolume5m && newVolume5m > 1000) {
+                changes.push(`Vol5m: New activity ${newVolume5m.toLocaleString()}`);
+                hasSignificantChange = true;
+              }
+
+              // Volume 24h large change (2x+ or halved, or new activity)
+              if (oldVolume24h > 0 && newVolume24h && newVolume24h > 0) {
+                const ratio = newVolume24h / oldVolume24h;
+                if (ratio >= 2 || ratio <= 0.5) {
+                  const perc = (ratio - 1) * 100;
+                  let v24Msg = `Vol24h ${ratio >= 2 ? '2x+' : 'halved-'} ${newVolume24h.toLocaleString()} (from ${oldVolume24h.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  changes.push(v24Msg);
+                  hasSignificantChange = true;
+                }
+              } else if (oldVolume24h === 0 && newVolume24h && newVolume24h > 10000) {
+                changes.push(`Vol24h: New activity ${newVolume24h.toLocaleString()}`);
+                hasSignificantChange = true;
+              }
+
+              // CTO info change
+              if (JSON.stringify(oldCtoInfo) !== JSON.stringify(filteredCtoInfo)) {
+                changes.push('CTO Info Updated');
+                hasSignificantChange = true;
+                ctoChanged = true;
+              }
+
+              if (hasSignificantChange) {
+                const changeDirection = changes.some(c => c.includes('2x+') || c.includes('New activity')) ? '🚀 UP/BREAKOUT' : '⚠️ DOWN/UPDATE';
+                logger.info(`${changeDirection} [Dexscreener][SIGNIFICANT_CHANGE] 
   ├─ Contract: ${item.contract} (${item.chain})
-  ├─ Old MC: ${oldMarketCap?.toLocaleString() || 'N/A'} USD
-  ├─ New MC: ${newMarketCap.toLocaleString()} USD
-  ├─ Absolute Change: ${changeDirection === 'UP' ? '+' : '-'}${absChangeFormatted} USD
-  ├─ Percentage Change: ${percChangeFormatted} 
+  ${changes.map(c => `  ├─ ${c}`).join('\n')}
   ├─ Price USD: ${newPriceUsd?.toFixed(4) || 'N/A'}
-  ├─ FDV: ${newFdv?.toLocaleString() || 'N/A'} USD
-  ├─ Vol 5m: ${newVolume5m?.toLocaleString() || 'N/A'} USD
-  ├─ Vol 24h: ${newVolume24h?.toLocaleString() || 'N/A'} USD
   └─ Timestamp: ${new Date().toISOString()}`);
 
-                // Log CTO info details
-                if (ctoInfo && Object.keys(ctoInfo).length > 0) {
-                  logger.info(`[Dexscreener][CTO_INFO] for ${item.contract} (${item.chain})
-  ├─ Image URL: ${imageUrl || 'N/A'}
-  ├─ Websites: ${websites || '[]'}
-  └─ Socials: ${socials || '[]'}`);
+                if (ctoChanged) {
+                  logger.info(`[Dexscreener][CTO_UPDATE] for ${item.contract} (${item.chain})
+  ├─ Image URL: ${filteredCtoInfo.imageUrl || 'N/A'}
+  ├─ Websites: ${JSON.stringify(filteredCtoInfo.websites) || '[]'}
+  └─ Socials: ${JSON.stringify(filteredCtoInfo.socials) || '[]'}`);
                 }
 
+                // Post to Twitter
+                const tweetChanges = changes.slice(0, 3).join(' | '); // Limit to 3 changes for brevity
+                const tweetText = `🚨 Token Alert: ${changeDirection} for ${item.contract} on ${item.chain}! ${tweetChanges} Price: $${newPriceUsd?.toFixed(6) || 'N/A'} #Crypto #DeFi #Tokens`;
+                await twitterService.postTweet(tweetText);
+
                 changesDetected++;
-                totalAbsoluteChange += Math.abs(absoluteChange);
               } else {
                 logger.debug(`[Dexscreener] No significant change for ${item.contract} on ${item.chain} (MC: ${newMarketCap.toLocaleString()})`);
               }
