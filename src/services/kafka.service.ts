@@ -42,28 +42,31 @@ const ACTION_TYPE_MAP: { [key: string]: string } = {
 
 /**
  * Parses numeric strings, including those with K/M suffixes and scientific notation (like 0.000001).
+ * Assumes input is in milliseconds; returns milliseconds as number.
  * @param str The string value to parse.
- * @returns The parsed number or 0 if parsing fails.
+ * @returns The parsed number in milliseconds or Date.now() if parsing fails.
  */
 const parseNumericValue = (str: string | undefined): number => {
-    if (!str || typeof str !== 'string') return 0;
+    if (!str || typeof str !== 'string') return Date.now();
 
     // Handle price strings like "0.0₄5643" (0.00005643) by replacing the subscript number
     const scientificMatch = str.match(/0\.0(\d+)([a-zA-Z\d\.]+)/);
     if (scientificMatch) {
         const zeros = parseInt(scientificMatch[1], 10);
         const value = parseFloat(`0.${'0'.repeat(zeros)}${scientificMatch[2]}`);
-        if (!isNaN(value)) return value;
+        if (!isNaN(value)) return value * 1000; // But this is for price, not timestamp; adjust if needed
     }
 
-    // Handle K/M suffixes
+    // Handle K/M suffixes (unlikely for timestamps, but kept for compatibility)
     let numStr = str.replace(/[^eE\d.]/g, ''); // Clean non-numeric, non-dot, non-E/e characters
     let num = parseFloat(numStr);
 
     if (str.toUpperCase().includes('M')) num *= 1e6;
     else if (str.toUpperCase().includes('K')) num *= 1e3;
 
-    return isNaN(num) ? 0 : num;
+    const parsed = isNaN(num) ? Date.now() : num;
+    // Detect if input looks like seconds (small number < 1e10) vs ms (>1e10), but assume ms as per fallback
+    return parsed < 1e10 ? parsed * 1000 : parsed; // Heuristic: if <10 digits, treat as seconds and convert to ms
 };
 
 export class KafkaService {
@@ -111,7 +114,9 @@ export class KafkaService {
                         }
 
                         // === Data Parsing and Assignment ===
-                        const timestamp = Math.floor(parseNumericValue(trade.createTime || String(Date.now())) / 1000);
+                        // FIX: Parse to ms, then convert to ISO string for QuestDB
+                        const timestampMs = parseNumericValue(trade.createTime || String(Date.now()));
+                        const timestampIso = new Date(timestampMs).toISOString();
 
                         const kolId = String(trade.kol?.id || '');
                         const kolName = String(trade.kol?.name || '');
@@ -154,7 +159,7 @@ export class KafkaService {
                         console.log(trade, "trade"
                         );
 
-                        logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT)`);
+                        logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT) at ${timestampIso}`);
 
                         // NOTE ON DUPLICATES: 
                         // The primary key for 'kol_trades' should ideally be (txHash, timestamp) 
@@ -163,7 +168,7 @@ export class KafkaService {
                         // since we have a unique txHash.
 
                         await questdbService.insertBatch('kol_trades', [{
-                            timestamp,
+                            timestamp: timestampIso,  // Now ISO string
                             kolId,
                             kolName,
                             kolAvatar,

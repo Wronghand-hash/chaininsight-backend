@@ -313,13 +313,17 @@ export class QuestDBService {
 
         switch (table) {
           case 'kol_trades':
+            // Ensure timestamp is a valid ISO string for TIMESTAMP column
+            const timestampIso = typeof row.timestamp === 'string'
+              ? row.timestamp
+              : new Date(Number(row.timestamp) * 1000).toISOString();
             sql = `INSERT INTO kol_trades (
               timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, initialPrice, txHash,
               fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
               walletType, recentBuyerKols, recentSellerKols, chain
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22);`;
             values = [
-              row.timestamp,
+              timestampIso,
               String(row.kolId || ''),
               String(row.kolName || ''),
               String(row.kolAvatar || ''),
@@ -345,10 +349,14 @@ export class QuestDBService {
             break;
 
           case 'prices':
+            // Ensure timestamp is ISO string
+            const priceTsIso = typeof row.timestamp === 'string'
+              ? row.timestamp
+              : new Date(Number(row.timestamp) * 1000).toISOString();
             sql = `INSERT INTO prices (timestamp, contract, priceUsd, volume, chain)
                     VALUES ($1,$2,$3,$4,$5);`;
             values = [
-              row.timestamp,
+              priceTsIso,
               String(row.contract),
               row.priceUsd != null ? Number(row.priceUsd) : null,
               row.volume != null ? Number(row.volume) : null,
@@ -357,10 +365,14 @@ export class QuestDBService {
             break;
 
           case 'token_info':
+            // Ensure timestamp is ISO string
+            const infoTsIso = typeof row.timestamp === 'string'
+              ? row.timestamp
+              : new Date(Number(row.timestamp) * 1000).toISOString();
             sql = `INSERT INTO token_info (timestamp, contract, data, chain)
                     VALUES ($1,$2,$3,$4);`;
             values = [
-              row.timestamp,
+              infoTsIso,
               String(row.contract),
               String(row.data),
               String(row.chain)
@@ -368,10 +380,14 @@ export class QuestDBService {
             break;
 
           case 'security_labels':
+            // Ensure timestamp is ISO string
+            const labelTsIso = typeof row.timestamp === 'string'
+              ? row.timestamp
+              : new Date(Number(row.timestamp) * 1000).toISOString();
             sql = `INSERT INTO security_labels (timestamp, address, data, chain)
                     VALUES ($1,$2,$3,$4);`;
             values = [
-              row.timestamp,
+              labelTsIso,
               String(row.address),
               String(row.data),
               String(row.chain)
