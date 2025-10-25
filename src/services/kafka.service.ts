@@ -114,8 +114,8 @@ export class KafkaService {
                         }
 
                         // === Data Parsing and Assignment ===
-                        // FIX: Parse to ms, then convert to ISO string for QuestDB
-                        const timestampMs = parseNumericValue(trade.createTime || String(Date.now()));
+                        // Use current timestamp for all new records
+                        const timestampMs = Date.now();
                         const timestampIso = new Date(timestampMs).toISOString();
 
                         const kolId = String(trade.kol?.id || '');
