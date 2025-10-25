@@ -60,21 +60,25 @@ class TokenMetricsDexscreenerPoller {
       })).filter(x => x.contract);
 
       if (items.length === 0) {
-        logger.info('No items found in token_metrics to poll');
+        logger.info('No items found in token_metrics to poll - skipping this cycle');
         return;
       }
 
-      logger.info(`Polling Dexscreener for ${items.length} contracts from token_metrics`);
+      logger.info(`Starting Dexscreener poll cycle: Fetching data for ${items.length} unique tokens across chains`);
 
       const uniqueContracts = Array.from(new Set(items.map(i => i.contract)));
       const batches = this.chunk(uniqueContracts, 30);
 
-      for (const batch of batches) {
+      let totalChangesDetected = 0;
+      let totalAbsoluteChange = 0;
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
         const batchUrl = `${config.baseUrls.dexscreener}${batch.join(',')}`;
         try {
-          logger.info(`[Dexscreener][batch:url] (${batch.length}) -> ${batchUrl}`);
+          logger.info(`[Dexscreener][batch:${batchIndex + 1}/${batches.length}] Fetching ${batch.length} contracts -> ${batchUrl}`);
           const resp = await fetch(batchUrl);
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}: Failed to fetch batch from Dexscreener`);
           const json = await resp.json();
 
           // Process the response: group pairs by (contract, chain) and detect changes
@@ -89,14 +93,15 @@ class TokenMetricsDexscreenerPoller {
             pairsByContractChain.get(key)!.push(pair);
           }
 
-          let changesDetected = 0;
-          let totalAbsoluteChange = 0;
+          let batchChangesDetected = 0;
+          let batchAbsoluteChange = 0;
+
           for (const item of items) {
             if (batch.includes(item.contract)) {
               const key = `${item.contract}:${item.chain}`;
               const relevantPairs = pairsByContractChain.get(key) || [];
               if (relevantPairs.length === 0) {
-                logger.warn(`[Dexscreener] No pairs found for ${item.contract} on ${item.chain}`);
+                logger.warn(`[Dexscreener] No trading pairs found for contract ${item.contract} on chain ${item.chain} - skipping update`);
                 continue;
               }
 
@@ -125,7 +130,7 @@ class TokenMetricsDexscreenerPoller {
               };
 
               if (newMarketCap == null) {
-                logger.warn(`[Dexscreener] Invalid marketCap for ${item.contract} on ${item.chain}`);
+                logger.warn(`[Dexscreener] Invalid or missing marketCap for ${item.contract} on ${item.chain} - skipping update`);
                 continue;
               }
 
@@ -151,11 +156,12 @@ class TokenMetricsDexscreenerPoller {
                 const ratio = newMarketCap / oldMarketCap;
                 if (ratio >= 2 || ratio <= 0.5) {
                   const perc = (ratio - 1) * 100;
-                  let mcMsg = `MC ${ratio >= 2 ? '2x+' : 'halved-'} ${newMarketCap.toLocaleString()} (from ${oldMarketCap.toLocaleString()}, ${perc.toFixed(1)}%)`;
-                  if (ratio >= 3) mcMsg += ' (3x+)';
+                  const absChange = newMarketCap - oldMarketCap;
+                  let mcMsg = `Market Cap ${ratio >= 2 ? 'surged' : 'dropped'} to $${newMarketCap.toLocaleString()} (from $${oldMarketCap.toLocaleString()}, ${absChange >= 0 ? '+' : ''}${absChange.toLocaleString()} USD, ${perc.toFixed(1)}% change)`;
+                  if (ratio >= 3) mcMsg += ' - Massive 3x+ pump!';
                   changes.push(mcMsg);
                   hasSignificantChange = true;
-                  totalAbsoluteChange += Math.abs(newMarketCap - oldMarketCap);
+                  batchAbsoluteChange += Math.abs(absChange);
                 }
               }
 
@@ -164,8 +170,9 @@ class TokenMetricsDexscreenerPoller {
                 const ratio = newFdv / oldFdv;
                 if (ratio >= 2 || ratio <= 0.5) {
                   const perc = (ratio - 1) * 100;
-                  let fdvMsg = `FDV ${ratio >= 2 ? '2x+' : 'halved-'} ${newFdv.toLocaleString()} (from ${oldFdv.toLocaleString()}, ${perc.toFixed(1)}%)`;
-                  if (ratio >= 3) fdvMsg += ' (3x+)';
+                  const absChange = newFdv - oldFdv;
+                  let fdvMsg = `FDV ${ratio >= 2 ? 'surged' : 'dropped'} to $${newFdv.toLocaleString()} (from $${oldFdv.toLocaleString()}, ${absChange >= 0 ? '+' : ''}${absChange.toLocaleString()} USD, ${perc.toFixed(1)}% change)`;
+                  if (ratio >= 3) fdvMsg += ' - Massive 3x+ pump!';
                   changes.push(fdvMsg);
                   hasSignificantChange = true;
                 }
@@ -176,12 +183,13 @@ class TokenMetricsDexscreenerPoller {
                 const ratio = newVolume5m / oldVolume5m;
                 if (ratio >= 2 || ratio <= 0.5) {
                   const perc = (ratio - 1) * 100;
-                  let v5Msg = `Vol5m ${ratio >= 2 ? '2x+' : 'halved-'} ${newVolume5m.toLocaleString()} (from ${oldVolume5m.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  const absChange = newVolume5m - oldVolume5m;
+                  let v5Msg = `5m Volume ${ratio >= 2 ? 'spiked' : 'dropped'} to $${newVolume5m.toLocaleString()} (from $${oldVolume5m.toLocaleString()}, ${absChange >= 0 ? '+' : ''}${absChange.toLocaleString()} USD, ${perc.toFixed(1)}% change)`;
                   changes.push(v5Msg);
                   hasSignificantChange = true;
                 }
               } else if (oldVolume5m === 0 && newVolume5m && newVolume5m > 1000) {
-                changes.push(`Vol5m: New activity ${newVolume5m.toLocaleString()}`);
+                changes.push(`5m Volume: New high activity detected at $${newVolume5m.toLocaleString()} USD - Potential breakout!`);
                 hasSignificantChange = true;
               }
 
@@ -190,45 +198,56 @@ class TokenMetricsDexscreenerPoller {
                 const ratio = newVolume24h / oldVolume24h;
                 if (ratio >= 2 || ratio <= 0.5) {
                   const perc = (ratio - 1) * 100;
-                  let v24Msg = `Vol24h ${ratio >= 2 ? '2x+' : 'halved-'} ${newVolume24h.toLocaleString()} (from ${oldVolume24h.toLocaleString()}, ${perc.toFixed(1)}%)`;
+                  const absChange = newVolume24h - oldVolume24h;
+                  let v24Msg = `24h Volume ${ratio >= 2 ? 'spiked' : 'dropped'} to $${newVolume24h.toLocaleString()} (from $${oldVolume24h.toLocaleString()}, ${absChange >= 0 ? '+' : ''}${absChange.toLocaleString()} USD, ${perc.toFixed(1)}% change)`;
                   changes.push(v24Msg);
                   hasSignificantChange = true;
                 }
               } else if (oldVolume24h === 0 && newVolume24h && newVolume24h > 10000) {
-                changes.push(`Vol24h: New activity ${newVolume24h.toLocaleString()}`);
+                changes.push(`24h Volume: New high activity detected at $${newVolume24h.toLocaleString()} USD - Gaining traction!`);
                 hasSignificantChange = true;
               }
 
               // CTO info change
               if (JSON.stringify(oldCtoInfo) !== JSON.stringify(filteredCtoInfo)) {
-                changes.push('CTO Info Updated');
+                changes.push('CTO Info Updated: New websites/socials or image detected');
                 hasSignificantChange = true;
                 ctoChanged = true;
               }
 
               if (hasSignificantChange) {
-                const changeDirection = changes.some(c => c.includes('2x+') || c.includes('New activity')) ? '🚀 UP/BREAKOUT' : '⚠️ DOWN/UPDATE';
-                logger.info(`${changeDirection} [Dexscreener][SIGNIFICANT_CHANGE] 
-  ├─ Contract: ${item.contract} (${item.chain})
-  ${changes.map(c => `  ├─ ${c}`).join('\n')}
-  ├─ Price USD: ${newPriceUsd?.toFixed(4) || 'N/A'}
+                const isPositiveChange = changes.some(c => c.includes('surged') || c.includes('spiked') || c.includes('New high activity') || c.includes('3x+'));
+                const changeDirection = isPositiveChange ? '🚀 UP/BREAKOUT' : '⚠️ DOWN/UPDATE';
+                const totalPercChanges = changes.filter(c => c.includes('%')).map(c => parseFloat(c.match(/(-?\d+\.?\d*)%/)?.[1] || '0'));
+                const avgPercChange = totalPercChanges.length > 0 ? totalPercChanges.reduce((a, b) => a + b, 0) / totalPercChanges.length : 0;
+
+                logger.info(`${changeDirection} [Dexscreener][SIGNIFICANT_CHANGE] Detected ${changes.length} major updates for ${item.contract} on ${item.chain}:
+  📊 Summary: Average change ${avgPercChange.toFixed(1)}% across metrics
+  ├─ Current Price: $${newPriceUsd?.toFixed(4) || 'N/A'}
+  ${changes.map((c, idx) => `  ├─ Change ${idx + 1}: ${c}`).join('\n')}
   └─ Timestamp: ${new Date().toISOString()}`);
 
                 if (ctoChanged) {
-                  logger.info(`[Dexscreener][CTO_UPDATE] for ${item.contract} (${item.chain})
-  ├─ Image URL: ${filteredCtoInfo.imageUrl || 'N/A'}
-  ├─ Websites: ${JSON.stringify(filteredCtoInfo.websites) || '[]'}
-  └─ Socials: ${JSON.stringify(filteredCtoInfo.socials) || '[]'}`);
+                  logger.info(`[Dexscreener][CTO_UPDATE] Detailed CTO changes for ${item.contract} (${item.chain}):
+  ├─ New Image URL: ${filteredCtoInfo.imageUrl || 'No change'}
+  ├─ Websites (${filteredCtoInfo.websites?.length || 0}): ${JSON.stringify(filteredCtoInfo.websites) || 'None'}
+  └─ Socials (${filteredCtoInfo.socials?.length || 0}): ${JSON.stringify(filteredCtoInfo.socials) || 'None'}`);
                 }
 
                 // Post to Twitter
-                const tweetChanges = changes.slice(0, 3).join(' | '); // Limit to 3 changes for brevity
-                const tweetText = `🚨 Token Alert: ${changeDirection} for ${item.contract} on ${item.chain}! ${tweetChanges} Price: $${newPriceUsd?.toFixed(6) || 'N/A'} #Crypto #DeFi #Tokens`;
-                await twitterService.postTweet(tweetText);
+                const tweetChanges = changes.slice(0, 3).map(c => c.split(' (')[0]).join(' | '); // Shorten for tweet
+                const tweetText = `🚨 Token Alert: ${changeDirection} on ${item.chain}! ${item.contract.slice(0, 10)}... ${tweetChanges} | Price: $${newPriceUsd?.toFixed(6) || 'N/A'} | Avg Change: ${avgPercChange.toFixed(1)}% #Crypto #DeFi #Tokens`;
+                logger.info(`[Twitter] Preparing alert tweet: "${tweetText}"`);
+                const tweetSuccess = await twitterService.postTweet(tweetText);
+                if (tweetSuccess) {
+                  logger.info(`[Twitter] ✅ Alert tweet posted successfully for ${item.contract}`);
+                } else {
+                  logger.warn(`[Twitter] ❌ Failed to post alert tweet for ${item.contract} - Check credentials/limits`);
+                }
 
-                changesDetected++;
+                batchChangesDetected++;
               } else {
-                logger.debug(`[Dexscreener] No significant change for ${item.contract} on ${item.chain} (MC: ${newMarketCap.toLocaleString()})`);
+                logger.debug(`[Dexscreener] No significant changes detected for ${item.contract} on ${item.chain} - Metrics stable (MC: $${newMarketCap.toLocaleString()})`);
               }
 
               // Create filtered pair for storage
@@ -236,20 +255,31 @@ class TokenMetricsDexscreenerPoller {
 
               // Always update the DB with latest metrics (includes filtered dexscreener_info)
               await questdbService.saveTokenMetrics(item.contract, item.chain as any, {} as TokenInfoResponse, { pairs: [filteredPair] });
+              logger.debug(`[DB] Updated metrics for ${item.contract} (${item.chain}): MC=$${newMarketCap.toLocaleString()}, Vol5m=$${newVolume5m?.toLocaleString() || '0'} USD`);
             }
           }
 
-          if (changesDetected > 0) {
-            logger.info(`[Dexscreener][batch:summary] size=${batch.length}, changes_detected=${changesDetected}, total_abs_change=${totalAbsoluteChange.toLocaleString()} USD`);
+          totalChangesDetected += batchChangesDetected;
+          totalAbsoluteChange += batchAbsoluteChange;
+
+          if (batchChangesDetected > 0) {
+            logger.info(`[Dexscreener][batch:${batchIndex + 1} summary] Processed ${batch.length} contracts: ${batchChangesDetected} significant changes detected, total absolute change $${batchAbsoluteChange.toLocaleString()} USD`);
           } else {
-            logger.debug(`[Dexscreener][batch:summary] size=${batch.length}, no_changes`);
+            logger.debug(`[Dexscreener][batch:${batchIndex + 1} summary] Processed ${batch.length} contracts: No significant changes`);
           }
-        } catch (err) {
-          logger.warn(`[Dexscreener][batch:failed] size=${batch.length}`, err as any);
+        } catch (err: any) {
+          logger.error(`[Dexscreener][batch:${batchIndex + 1} failed] Error processing ${batch.length} contracts: ${err.message}`, { error: err });
         }
       }
+
+      // Overall cycle summary
+      if (totalChangesDetected > 0) {
+        logger.info(`[Dexscreener][cycle:complete] Poll cycle finished: ${totalChangesDetected} total significant changes across ${batches.length} batches, total absolute market change $${totalAbsoluteChange.toLocaleString()} USD - Alerts sent!`);
+      } else {
+        logger.info(`[Dexscreener][cycle:complete] Poll cycle finished: No significant changes detected across ${uniqueContracts.length} contracts - Market steady`);
+      }
     } catch (e) {
-      logger.warn('TokenMetricsDexscreenerPoller fetchTokenDexInfo failed', e as any);
+      logger.error('TokenMetricsDexscreenerPoller fetchTokenDexInfo failed - Full cycle error', { error: e });
     }
   }
 }
