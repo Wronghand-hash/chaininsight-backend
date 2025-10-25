@@ -150,6 +150,7 @@ class TokenMetricsDexscreenerPoller {
               let hasSignificantChange = false;
               const changes: string[] = [];
               let ctoChanged = false;
+              let ctoDetails: string[] = [];
 
               // Market Cap large change (2x+, 3x+, or halved)
               if (oldMarketCap > 0 && newMarketCap > 0) {
@@ -208,11 +209,43 @@ class TokenMetricsDexscreenerPoller {
                 hasSignificantChange = true;
               }
 
-              // CTO info change
+              // CTO info change - Detailed diff
               if (JSON.stringify(oldCtoInfo) !== JSON.stringify(filteredCtoInfo)) {
-                changes.push('CTO Info Updated: New websites/socials or image detected');
-                hasSignificantChange = true;
                 ctoChanged = true;
+                hasSignificantChange = true;
+
+                // Image change
+                if (oldCtoInfo.imageUrl !== filteredCtoInfo.imageUrl) {
+                  ctoDetails.push(`New logo: ${filteredCtoInfo.imageUrl || 'added'}`);
+                }
+
+                // Websites diff
+                const oldWebsites = oldCtoInfo.websites || [];
+                const newWebsites = filteredCtoInfo.websites || [];
+                if (newWebsites.length > oldWebsites.length || JSON.stringify(newWebsites) !== JSON.stringify(oldWebsites)) {
+                  const addedWebsites = newWebsites.filter((w: any) => !oldWebsites.some((ow: any) => ow.url === w.url));
+                  if (addedWebsites.length > 0) {
+                    const siteLinks = addedWebsites.map((w: any) => `${w.label || 'Site'}: ${w.url}`).join(', ');
+                    ctoDetails.push(`New sites: ${siteLinks}`);
+                  }
+                }
+
+                // Socials diff
+                const oldSocials = oldCtoInfo.socials || [];
+                const newSocials = filteredCtoInfo.socials || [];
+                if (newSocials.length > oldSocials.length || JSON.stringify(newSocials) !== JSON.stringify(oldSocials)) {
+                  const addedSocials = newSocials.filter((s: any) => !oldSocials.some((os: any) => os.url === s.url));
+                  if (addedSocials.length > 0) {
+                    const socialLinks = addedSocials.map((s: any) => `${s.type}: ${s.url}`).join(', ');
+                    ctoDetails.push(`New socials: ${socialLinks}`);
+                  }
+                }
+
+                if (ctoDetails.length > 0) {
+                  changes.push(`CTO Updated: ${ctoDetails.join(' | ')}`);
+                } else {
+                  changes.push('CTO Info Updated: Metadata refreshed');
+                }
               }
 
               if (hasSignificantChange) {
@@ -234,9 +267,32 @@ class TokenMetricsDexscreenerPoller {
   └─ Socials (${filteredCtoInfo.socials?.length || 0}): ${JSON.stringify(filteredCtoInfo.socials) || 'None'}`);
                 }
 
-                // Post to Twitter
-                const tweetChanges = changes.slice(0, 3).map(c => c.split(' (')[0]).join(' | '); // Shorten for tweet
-                const tweetText = `🚨 Token Alert: ${changeDirection} on ${item.chain}! ${item.contract.slice(0, 10)}... ${tweetChanges} | Price: $${newPriceUsd?.toFixed(6) || 'N/A'} | Avg Change: ${avgPercChange.toFixed(1)}% #Crypto #DeFi #Tokens`;
+                // Post to Twitter - Enhanced with full address, link, and specific changes
+                const dexLink = `https://dexscreener.com/${item.chain.toLowerCase()}/${item.contract}`;
+                const tweetBody = changes.slice(0, 2).map(c => {
+                  // Extract key parts for brevity: e.g., "5m Vol spiked 452% $8.5k→$48.5k"
+                  if (c.includes('Volume') && c.includes('spiked')) {
+                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, \+?(\d+\.?\d*)% change\)/);
+                    if (match) return `5m Vol +${match[1]}%`;
+                  } else if (c.includes('Volume') && c.includes('dropped')) {
+                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, -(\d+\.?\d*)% change\)/);
+                    if (match) return `5m Vol -${match[1]}%`;
+                  } else if (c.includes('CTO Updated')) {
+                    return ctoDetails.slice(0, 1).join(' | ').substring(0, 50) + '...';
+                  } else if (c.includes('Market Cap') || c.includes('FDV')) {
+                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, ([-+]\d+\.?\d*)% change\)/);
+                    if (match) return `${c.includes('Cap') ? 'MC' : 'FDV'} ${match[1]}%`;
+                  }
+                  return c.split(' to ')[0].substring(0, 40) + '...';
+                }).join(' | ');
+                const tweetText = `🚨 ${changeDirection} Alert on ${item.chain}! 
+
+${tweetBody}
+
+Price: $${newPriceUsd?.toFixed(6)} | MC: $${newMarketCap.toLocaleString()}
+${item.contract} 👉 ${dexLink}
+
+#Crypto #DeFi #Tokens`;
                 logger.info(`[Twitter] Preparing alert tweet: "${tweetText}"`);
                 const tweetSuccess = await twitterService.postTweet(tweetText);
                 if (tweetSuccess) {
