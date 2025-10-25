@@ -267,21 +267,21 @@ class TokenMetricsDexscreenerPoller {
   └─ Socials (${filteredCtoInfo.socials?.length || 0}): ${JSON.stringify(filteredCtoInfo.socials) || 'None'}`);
                 }
 
-                // Post to Twitter - Enhanced with full address, link, and specific changes
+                // Post to Twitter - Enhanced with full address, link, and specific changes including old/new values
                 const dexLink = `https://dexscreener.com/${item.chain.toLowerCase()}/${item.contract}`;
                 const tweetBody = changes.slice(0, 2).map(c => {
-                  // Extract key parts for brevity: e.g., "5m Vol spiked 452% $8.5k→$48.5k"
+                  // Extract key parts for brevity with old → new: e.g., "5m Vol $4.5k → $355 (-92.1%)"
                   if (c.includes('Volume') && c.includes('spiked')) {
-                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, \+?(\d+\.?\d*)% change\)/);
-                    if (match) return `5m Vol +${match[1]}%`;
+                    const match = c.match(/to \$([\d,]+\.?\d*) \(from \$([\d,]+\.?\d*), \+?([\d+\.?\d]*)% change\)/);
+                    if (match) return `5m Vol $${match[2]} → $${match[1]} (+${match[3]}%)`;
                   } else if (c.includes('Volume') && c.includes('dropped')) {
-                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, -(\d+\.?\d*)% change\)/);
-                    if (match) return `5m Vol -${match[1]}%`;
+                    const match = c.match(/to \$([\d,]+\.?\d*) \(from \$([\d,]+\.?\d*), -([\d+\.?\d]*)% change\)/);
+                    if (match) return `5m Vol $${match[2]} → $${match[1]} (-${match[3]}%)`;
                   } else if (c.includes('CTO Updated')) {
                     return ctoDetails.slice(0, 1).join(' | ').substring(0, 50) + '...';
                   } else if (c.includes('Market Cap') || c.includes('FDV')) {
-                    const match = c.match(/to \$\d+,?\d*\.\d* \(from \$\d+,?\d*\.\d*, ([-+]\d+\.?\d*)% change\)/);
-                    if (match) return `${c.includes('Cap') ? 'MC' : 'FDV'} ${match[1]}%`;
+                    const match = c.match(/to \$([\d,]+\.?\d*) \(from \$([\d,]+\.?\d*), ([-+]\d+\.?\d*)% change\)/);
+                    if (match) return `${c.includes('Cap') ? 'MC' : 'FDV'} $${match[2]} → $${match[1]} ${match[3]}%`;
                   }
                   return c.split(' to ')[0].substring(0, 40) + '...';
                 }).join(' | ');
