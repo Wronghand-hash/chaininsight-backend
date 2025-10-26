@@ -96,7 +96,10 @@ export class KolTradeService {
         const whereClause = `${timeFilter} ${chainFilter}`.trim();
         const sql = `
     SELECT 
-        contract,
+        CASE 
+            WHEN action IN ('add_position', 'initial_position') THEN contract 
+            ELSE toTokenAddress 
+        END AS contract,
         chain,
         COUNT(DISTINCT kolId) AS unique_kol_count,
         COUNT(DISTINCT CASE WHEN action LIKE '%buy%' THEN kolId END) AS buyer_kol_count,
@@ -105,7 +108,12 @@ export class KolTradeService {
         COUNT(*) AS trade_count
     FROM kol_trades
     WHERE ${whereClause}
-    GROUP BY contract, chain
+    GROUP BY 
+        CASE 
+            WHEN action IN ('add_position', 'initial_position') THEN contract 
+            ELSE toTokenAddress 
+        END, 
+        chain
     ORDER BY unique_kol_count DESC
     LIMIT ${limit};
 
