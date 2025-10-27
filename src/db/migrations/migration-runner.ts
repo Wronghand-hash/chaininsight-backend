@@ -38,13 +38,27 @@ export class MigrationRunner {
 
   async runMigrations() {
     await this.init();
-    
-    // Get all migration files
-    const migrationFiles = readdirSync(MIGRATIONS_DIR)
-      .filter(file => file.endsWith('.sql'))
-      .sort();
 
-    logger.info(`Found ${migrationFiles.length} migration files`);
+    // Get all migration files
+    logger.info(`Looking for migration files in: ${MIGRATIONS_DIR}`);
+    const allFiles = readdirSync(MIGRATIONS_DIR);
+    logger.debug(`All files in migrations directory: ${JSON.stringify(allFiles)}`);
+
+    const migrationFiles = allFiles
+      .filter(file => file.endsWith('.sql'));
+
+    logger.info(`Found ${migrationFiles.length} SQL migration files: ${JSON.stringify(migrationFiles)}`);
+
+    // Sort migrations by their numeric prefix
+    const sortedMigrations = migrationFiles
+      .map(file => ({
+        file,
+        id: parseInt(file.split('_')[0])
+      }))
+      .sort((a, b) => a.id - b.id)
+      .map(x => x.file);
+
+    logger.info(`Sorted migrations: ${JSON.stringify(sortedMigrations)}`);
 
     // Begin transaction
     await this.client.query('BEGIN');
@@ -58,7 +72,9 @@ export class MigrationRunner {
       const appliedIds = new Set(appliedMigrations.map(m => m.id));
       let migrationsRun = 0;
 
-      for (const file of migrationFiles) {
+      logger.info(`Processing migrations, ${sortedMigrations.length} found, ${appliedIds.size} already applied`);
+
+      for (const file of sortedMigrations) {
         const id = parseInt(file.split('_')[0]);
         if (appliedIds.has(id)) continue;
 
@@ -66,7 +82,27 @@ export class MigrationRunner {
         const sql = readFileSync(filePath, 'utf-8');
 
         logger.info(`Running migration: ${file}`);
-        await this.client.query(sql);
+
+        // 🛠️ CRITICAL FIX: Split SQL into individual statements and filter out comments.
+        const statements = sql
+          .split(';')
+          .map(s => s.trim())
+          // Filter: Keep if non-empty AND does not start with standard SQL comments
+          // We'll use a regex check for robustness
+          .filter(s => {
+            if (s.length === 0) return false;
+            // Check for single-line comments (--) or multi-line comments (/*)
+            const isComment = s.startsWith('--') || s.startsWith('/*');
+            return !isComment;
+          });
+
+        
+
+        // Execute each statement individually
+        for (const statement of statements) {
+          logger.debug(`Executing statement: ${statement}`);
+          await this.client.query(statement);
+        }
 
         // Record migration
         await this.client.query(
