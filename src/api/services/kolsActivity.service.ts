@@ -19,12 +19,15 @@ interface KolInfo {
 
 interface TopToken {
     contract: string;
+    tokenName: string;
     chain: Chain;
     uniqueKolCount: number;
     buyerKolCount: number;
     sellerKolCount: number;
     latestTimestamp: string;
     tradeCount: number;
+    totalBoughtAmount: number;
+    totalSoldAmount: number;
 }
 
 export class KolTradeService {
@@ -97,22 +100,32 @@ export class KolTradeService {
         const sql = `
     SELECT 
         CASE 
-            WHEN action IN ('add_position', 'initial_position') THEN contract 
-            ELSE toTokenAddress 
+            WHEN action IN ('add_position', 'initial_position') THEN toTokenAddress 
+            ELSE fromTokenAddress 
         END AS contract,
+        CASE 
+            WHEN action IN ('add_position', 'initial_position') THEN toToken 
+            ELSE fromToken 
+        END AS token_name,
         chain,
         COUNT(DISTINCT kolId) AS unique_kol_count,
-        COUNT(DISTINCT CASE WHEN action LIKE '%buy%' THEN kolId END) AS buyer_kol_count,
-        COUNT(DISTINCT CASE WHEN action LIKE '%sell%' THEN kolId END) AS seller_kol_count,
+        COUNT(DISTINCT CASE WHEN action IN ('add_position', 'initial_position') THEN kolId END) AS buyer_kol_count,
+        COUNT(DISTINCT CASE WHEN action NOT IN ('add_position', 'initial_position') THEN kolId END) AS seller_kol_count,
         MAX(timestamp) AS latest_timestamp,
-        COUNT(*) AS trade_count
+        COUNT(*) AS trade_count,
+        SUM(CASE WHEN action IN ('add_position', 'initial_position') THEN CAST(toTokenCount AS DOUBLE) ELSE 0.0 END) AS total_bought_amount,
+        SUM(CASE WHEN action NOT IN ('add_position', 'initial_position') THEN CAST(fromTokenCount AS DOUBLE) ELSE 0.0 END) AS total_sold_amount
     FROM kol_trades
     WHERE ${whereClause}
     GROUP BY 
         CASE 
-            WHEN action IN ('add_position', 'initial_position') THEN contract 
-            ELSE toTokenAddress 
+            WHEN action IN ('add_position', 'initial_position') THEN toTokenAddress 
+            ELSE fromTokenAddress 
         END, 
+        CASE 
+            WHEN action IN ('add_position', 'initial_position') THEN toToken 
+            ELSE fromToken 
+        END,
         chain
     ORDER BY unique_kol_count DESC
     LIMIT ${limit};
@@ -123,12 +136,15 @@ export class KolTradeService {
             const result: any = await questdbService.query(sql);
             const tokens: TopToken[] = result.rows.map((row: any) => ({
                 contract: String(row[0]),
-                chain: row[1] as Chain,
-                uniqueKolCount: Number(row[2]),
-                buyerKolCount: Number(row[3]),
-                sellerKolCount: Number(row[4]),
-                latestTimestamp: String(row[5]),
-                tradeCount: Number(row[6])
+                tokenName: String(row[1]),
+                chain: row[2] as Chain,
+                uniqueKolCount: Number(row[3]),
+                buyerKolCount: Number(row[4]),
+                sellerKolCount: Number(row[5]),
+                latestTimestamp: String(row[6]),
+                tradeCount: Number(row[7]),
+                totalBoughtAmount: Number(row[8]),
+                totalSoldAmount: Number(row[9])
             }));
 
             logger.info(`Retrieved top ${tokens.length} tokens for ${period}${chain ? ` on ${chain}` : ''}`);
