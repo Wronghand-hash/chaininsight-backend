@@ -25,7 +25,7 @@ interface TopToken {
     buyerKolCount: number;
     sellerKolCount: number;
     latestTimestamp: string;
-    tradeCount: number;
+    kolCallCount: number;  // Renamed from tradeCount for clarity (total KOL trades/calls)
     totalBoughtAmount: number;
     totalSoldAmount: number;
     totalTradeAmount: number;
@@ -136,7 +136,7 @@ export class KolTradeService {
         COUNT(DISTINCT CASE WHEN ${isBuyCond} THEN kolId END) AS buyer_kol_count,
         COUNT(DISTINCT CASE WHEN NOT ${isBuyCond} THEN kolId END) AS seller_kol_count,
         MAX(timestamp) AS latest_timestamp,
-        COUNT(*) AS trade_count,
+        COUNT(*) AS kol_call_count,  -- Renamed for clarity (total KOL trades/calls)
         SUM(CASE WHEN ${isBuyCond} THEN ${parseToCount} ELSE 0.0 END) AS total_bought_amount,
         SUM(CASE WHEN NOT ${isBuyCond} THEN ${parseFromCount} ELSE 0.0 END) AS total_sold_amount,
         SUM(${parseUsdtPrice}) AS total_trade_amount
@@ -146,7 +146,7 @@ export class KolTradeService {
         ${contractExpr}, 
         ${tokenNameExpr},
         chain
-    ORDER BY unique_kol_count DESC, total_trade_amount DESC
+    ORDER BY unique_kol_count DESC
     LIMIT ${limit};
         `;
 
@@ -160,7 +160,7 @@ export class KolTradeService {
                 buyerKolCount: Number(row[4] || 0),
                 sellerKolCount: Number(row[5] || 0),
                 latestTimestamp: String(row[6]),
-                tradeCount: Number(row[7] || 0),
+                kolCallCount: Number(row[7] || 0),  // Mapped from renamed alias
                 totalBoughtAmount: Number(row[8] || 0),
                 totalSoldAmount: Number(row[9] || 0),
                 totalTradeAmount: Number(row[10] || 0)
@@ -168,7 +168,7 @@ export class KolTradeService {
 
             logger.info(`Retrieved top ${tokens.length} tokens for ${period}${chain ? ` on ${chain}` : ''}`);
             if (tokens.length > 0) {
-                logger.info(`Top token: ${tokens[0].contract} - uniqueKOLs=${tokens[0].uniqueKolCount}, trades=${tokens[0].tradeCount}, totalTrade=${tokens[0].totalTradeAmount}`);
+                logger.info(`Top token: ${tokens[0].contract} - uniqueKOLs=${tokens[0].uniqueKolCount}, kolCalls=${tokens[0].kolCallCount}, totalTrade=${tokens[0].totalTradeAmount}`);
             }
             return tokens;
         } catch (error: any) {
