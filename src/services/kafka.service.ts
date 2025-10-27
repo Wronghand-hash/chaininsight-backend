@@ -106,13 +106,6 @@ export class KafkaService {
                             continue;
                         }
 
-                        const now = Date.now();
-                        const lastSeen = processedTxCache.get(txHash);
-                        if (lastSeen && now - lastSeen < DUP_TTL_MS) {
-                            logger.debug(`⏩ Skipping duplicate tx ${txHash}`);
-                            continue;
-                        }
-
                         // === Data Parsing and Assignment ===
                         // Use current timestamp for all new records
                         const timestampMs = Date.now();
@@ -193,7 +186,6 @@ export class KafkaService {
                         }]);
 
                         // Mark as processed only after successful insert
-                        processedTxCache.set(txHash, now);
                     }
                 } catch (error) {
                     logger.error(`Kafka message processing failed (offset ${message.offset}):`, error);

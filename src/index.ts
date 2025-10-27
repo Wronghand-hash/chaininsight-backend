@@ -56,8 +56,8 @@ const runMigrations = async () => {
   try {
     await questdbService.init();
     await runMigrations();
-    // await kafkaService.connect();  // NEW: Connect Kafka consumer
-    // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
+    await kafkaService.connect();  // NEW: Connect Kafka consumer
+    await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     // await tokenMetricsDexscreenerPoller.start();
     app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
