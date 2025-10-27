@@ -28,6 +28,7 @@ interface TopToken {
     tradeCount: number;
     totalBoughtAmount: number;
     totalSoldAmount: number;
+    totalTradeAmount: number;
 }
 
 export class KolTradeService {
@@ -89,6 +90,16 @@ export class KolTradeService {
         `;
     }
 
+    private parseTradeAmount(col: string): string {
+        return `
+          CASE
+            WHEN upper(${col}) LIKE '%M' THEN CAST(substring(${col}, 1, length(${col}) - 1) AS DOUBLE) * 1000000.0
+            WHEN upper(${col}) LIKE '%K' THEN CAST(substring(${col}, 1, length(${col}) - 1) AS DOUBLE) * 1000.0
+            ELSE CAST(COALESCE(${col}, '0') AS DOUBLE)
+          END
+        `;
+    }
+
     /**
      * Get top tokens by KOL activity
      * @param period Time period to analyze
@@ -114,6 +125,7 @@ export class KolTradeService {
         const tokenNameExpr = `CASE WHEN ${isBuyCond} THEN toToken ELSE fromToken END`;
         const parseToCount = this.parseAmount('toTokenCount');
         const parseFromCount = this.parseAmount('fromTokenCount');
+        const parseUsdtPrice = this.parseTradeAmount('usdtPrice');
 
         const sql = `
     SELECT 
@@ -126,14 +138,15 @@ export class KolTradeService {
         MAX(timestamp) AS latest_timestamp,
         COUNT(*) AS trade_count,
         SUM(CASE WHEN ${isBuyCond} THEN ${parseToCount} ELSE 0.0 END) AS total_bought_amount,
-        SUM(CASE WHEN NOT ${isBuyCond} THEN ${parseFromCount} ELSE 0.0 END) AS total_sold_amount
+        SUM(CASE WHEN NOT ${isBuyCond} THEN ${parseFromCount} ELSE 0.0 END) AS total_sold_amount,
+        SUM(${parseUsdtPrice}) AS total_trade_amount
     FROM kol_trades
     WHERE ${whereClause}
     GROUP BY 
         ${contractExpr}, 
         ${tokenNameExpr},
         chain
-    ORDER BY unique_kol_count DESC
+    ORDER BY unique_kol_count DESC, total_trade_amount DESC
     LIMIT ${limit};
         `;
 
@@ -149,12 +162,13 @@ export class KolTradeService {
                 latestTimestamp: String(row[6]),
                 tradeCount: Number(row[7] || 0),
                 totalBoughtAmount: Number(row[8] || 0),
-                totalSoldAmount: Number(row[9] || 0)
+                totalSoldAmount: Number(row[9] || 0),
+                totalTradeAmount: Number(row[10] || 0)
             }));
 
             logger.info(`Retrieved top ${tokens.length} tokens for ${period}${chain ? ` on ${chain}` : ''}`);
             if (tokens.length > 0) {
-                logger.info(`Top token: ${tokens[0].contract} - uniqueKOLs=${tokens[0].uniqueKolCount}, trades=${tokens[0].tradeCount}`);
+                logger.info(`Top token: ${tokens[0].contract} - uniqueKOLs=${tokens[0].uniqueKolCount}, trades=${tokens[0].tradeCount}, totalTrade=${tokens[0].totalTradeAmount}`);
             }
             return tokens;
         } catch (error: any) {
