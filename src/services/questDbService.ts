@@ -64,6 +64,45 @@ export class QuestDBService {
 
   private async createTables(): Promise<void> {
     const wal = config.questdb.enableWal ? ' WAL' : '';
+
+    // --- 1. HANDLE kol_trades TABLE CREATION (NO UNIQUE INDEX SUPPORT IN QUEStDB) ---
+    const kolTradesCreateSql = `CREATE TABLE IF NOT EXISTS kol_trades (
+        timestamp TIMESTAMP,
+        kolId LONG, 
+        kolName STRING,
+        kolAvatar STRING,
+        kolTwitterId STRING,
+        contract SYMBOL,
+        action SYMBOL,
+        amount STRING,
+        usdtPrice STRING,
+        initialPrice STRING,
+        txHash SYMBOL, 
+        fromToken STRING,
+        fromTokenAddress SYMBOL,
+        fromTokenCount STRING,
+        toToken STRING,
+        toTokenAddress SYMBOL,
+        toTokenCount STRING,
+        toTokenRemainCount STRING,
+        walletType INT,
+        recentBuyerKols STRING,
+        recentSellerKols STRING,
+        chain SYMBOL
+    ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 30d;`;
+    
+    try {
+        await this.pgClient.query(kolTradesCreateSql);
+        logger.debug(`✅ Table verified: kol_trades`);
+        logger.info('Note: Uniqueness for kol_trades enforced at application level (QuestDB does not support unique constraints)');
+    } catch (error) {
+        logger.warn(`⚠️ Table setup warning for kol_trades:`, error);
+        // If table creation fails, we must stop, as the constraint step will also fail.
+        throw error;
+    }
+    // --- END kol_trades HANDLING ---
+
+    // --- 2. HANDLE ALL OTHER TABLES IN A LOOP ---
     const tables = [
       {
         name: 'prices',
@@ -74,34 +113,6 @@ export class QuestDBService {
           volume DOUBLE,
           chain SYMBOL
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
-      },
-      {
-        name: 'kol_trades',
-        // FIX: Added 'initialPrice DOUBLE' to match the insertion logic in kafka.service.ts
-        create: `CREATE TABLE IF NOT EXISTS kol_trades (
-          timestamp TIMESTAMP,
-          kolId STRING,
-          kolName STRING,
-          kolAvatar STRING,
-          kolTwitterId STRING,
-          contract SYMBOL,
-          action SYMBOL,
-          amount STRING,
-          usdtPrice STRING,
-          initialPrice STRING,
-          txHash SYMBOL,
-          fromToken STRING,
-          fromTokenAddress SYMBOL,
-          fromTokenCount STRING,
-          toToken STRING,
-          toTokenAddress SYMBOL,
-          toTokenCount STRING,
-          toTokenRemainCount STRING,
-          walletType INT,
-          recentBuyerKols STRING,
-          recentSellerKols STRING,
-          chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 30d;`
       },
       {
         name: 'token_info',
@@ -153,6 +164,7 @@ export class QuestDBService {
         logger.warn(`⚠️ Table setup warning for ${table.name}:`, error);
       }
     }
+    // --- END OTHER TABLES HANDLING ---
 
     // Ensure token_metrics has the new columns if table existed before
     await this.ensureTokenMetricsColumns();
@@ -317,6 +329,24 @@ export class QuestDBService {
             const timestampIso = typeof row.timestamp === 'string'
               ? row.timestamp
               : new Date(Number(row.timestamp) * 1000).toISOString();
+            
+            // Ensure kolId is passed as a number/long for the LONG column type
+            const kolId = typeof row.kolId === 'string' ? parseInt(row.kolId, 10) : Number(row.kolId);
+            const contract = String(row.contract || '');
+            const txHash = String(row.txHash || '');
+
+            // Check for existence to enforce uniqueness (QuestDB does not support unique constraints)
+            const checkSql = `SELECT count(*) as c FROM kol_trades WHERE kolId = $1 AND contract = $2 AND txHash = $3;`;
+            const checkRes = await this.pgClient.query(checkSql, [kolId, contract, txHash]);
+            const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
+
+            if (exists) {
+              if (config.questdb.diagnosticsVerbose) {
+                logger.debug(`[QuestDB] Skipping duplicate kol_trade: kolId=${kolId}, contract=${contract}, txHash=${txHash}`);
+              }
+              continue; // Skip to next row
+            }
+
             sql = `INSERT INTO kol_trades (
               timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, initialPrice, txHash,
               fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
@@ -324,27 +354,27 @@ export class QuestDBService {
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22);`;
             values = [
               timestampIso,
-              String(row.kolId || ''),
+              kolId, // LONG
               String(row.kolName || ''),
               String(row.kolAvatar || ''),
               String(row.kolTwitterId || ''),
-              String(row.contract || ''),
-              String(row.action || 'unknown'),
+              contract, // SYMBOL
+              String(row.action || 'unknown'), // SYMBOL
               String(row.amount || ''),
               String(row.usdtPrice || ''),
               String(row.initialPrice || ''),
-              String(row.txHash || ''),
+              txHash, // SYMBOL
               String(row.fromToken || ''),
-              String(row.fromTokenAddress || ''),
+              String(row.fromTokenAddress || ''), // SYMBOL
               String(row.fromTokenCount || ''),
               String(row.toToken || ''),
-              String(row.toTokenAddress || ''),
+              String(row.toTokenAddress || ''), // SYMBOL
               String(row.toTokenCount || ''),
               String(row.toTokenRemainCount || ''),
               Number(row.walletType || 0),
               JSON.stringify(row.recentBuyerKols || []),
               JSON.stringify(row.recentSellerKols || []),
-              String(row.chain || 'BSC')
+              String(row.chain || 'BSC') // SYMBOL
             ];
             break;
 
@@ -408,6 +438,10 @@ export class QuestDBService {
         logger.debug(`✅ Inserted ${rows.length} rows into ${table}`);
       }
     } catch (error) {
+      // Error code '23505' is often the PostgreSQL code for a unique violation.
+      // QuestDB uses '42710' for "duplicate object" but sometimes other codes.
+      // It is critical to confirm the QuestDB error code for unique constraint violations
+      // to properly handle the Kafka at-least-once delivery duplicates here.
       logger.error(`❌ PG insert failed for ${table}`, error);
       throw error;
     }
