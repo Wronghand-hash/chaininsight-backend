@@ -3,24 +3,14 @@ import { Wallet } from 'ethers';
 import { logger } from '../utils/logger';
 import { questdbService } from './questDbService';
 
-// Define Chain type if not imported
 type Chain = 'BSC' | 'SOL';
 
 export class WalletService {
-    /**
-     * Generates a new keypair for the specified chain, derives the address,
-     * logs the details, and stores in payment_history and userPurchase tables.
-     * 
-     * @param chain - The blockchain chain ('BSC' or 'SOL')
-     * @param twitterId - The Twitter user ID
-     * @param amount - An amount parameter (e.g., funding amount in native token)
-     * @param serviceType - The type of service (e.g., 'wallet_generation')
-     */
     async generateAndLogKeyPair(
         chain: Chain,
         twitterId: string,
         amount: number,
-        serviceType: string = 'wallet_generation'
+        serviceType: string = 'x_alerts_service'
     ): Promise<{
         chain: Chain;
         twitterId: string;
@@ -38,12 +28,12 @@ export class WalletService {
         if (chain === 'BSC') {
             const wallet = Wallet.createRandom();
             address = wallet.address;
-            publicKey = wallet.publicKey; 
+            publicKey = wallet.publicKey;
             privateKey = wallet.privateKey;
         } else if (chain === 'SOL') {
             const keypair = Keypair.generate();
             address = keypair.publicKey.toBase58();
-            publicKey = keypair.publicKey.toBase58(); 
+            publicKey = keypair.publicKey.toBase58();
             privateKey = Buffer.from(keypair.secretKey).toString('hex');
         } else {
             throw new Error(`Unsupported chain: ${chain}. Supported: BSC, SOL.`);
@@ -64,17 +54,6 @@ export class WalletService {
             status: 'pending'
         };
 
-        // Prepare data for userPurchase (expire_at = created_at + 1 month)
-        // const createdAt = new Date(nowIso);
-        // const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));  // 30 days
-        // const userPurchaseRow = {
-        //     timestamp: nowIso,  // Use for consistency, though table uses created_at
-        //     twitterId,
-        //     amount,
-        //     serviceType,
-        //     created_at: nowIso,
-        //     expire_at: expireAt.toISOString()
-        // };
 
         // Insert into DB tables
         try {
@@ -93,7 +72,7 @@ export class WalletService {
             serviceType,
             address,
             publicKey,
-            privateKey: privateKey.substring(0, 10) + '...', // Log truncated private key for security
+            privateKey: privateKey.substring(0, 10) + '...',
         });
 
         console.log(`

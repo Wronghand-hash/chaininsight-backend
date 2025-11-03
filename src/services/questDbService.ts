@@ -153,6 +153,7 @@ export class QuestDBService {
           CTO STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
+      // Updated table: payment_history (removed DEFAULT, QuestDB does not support it)
       {
         name: 'payment_history',
         create: `CREATE TABLE IF NOT EXISTS payment_history (
@@ -164,21 +165,22 @@ export class QuestDBService {
           address SYMBOL,
           publicKey STRING,
           privateKey STRING,  -- Store securely; consider encryption in production
-          paymentStatus BOOLEAN DEFAULT false,  -- Default to false
+          paymentStatus BOOLEAN,
           status STRING  -- e.g., 'completed', 'pending'
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 90d;`  // Longer TTL for history
       },
-      // New table: userPurchase
+      // Updated table: userPurchase (added address SYMBOL)
       {
         name: 'userPurchase',
         create: `CREATE TABLE IF NOT EXISTS userPurchase (
           id LONG,  -- Auto-increment or UUID as LONG
           twitterId STRING,
           amount DOUBLE,
+          address SYMBOL,
           created_at TIMESTAMP,
           expire_at TIMESTAMP,
           serviceType STRING
-        ) TIMESTAMP(created_at) PARTITION BY DAY${wal} ;`  // 1 year TTL for purchases
+        ) TIMESTAMP(created_at) PARTITION BY DAY${wal} TTL 365d;`  // 1 year TTL for purchases
       }
     ];
 
@@ -200,6 +202,9 @@ export class QuestDBService {
 
     // Ensure payment_history has paymentStatus if table existed before
     await this.ensurePaymentHistoryPaymentStatus();
+
+    // Ensure userPurchase has address column if table existed before
+    await this.ensureUserPurchaseAddress();
 
     logger.info('✅ QuestDB tables created or verified');
   }
@@ -248,12 +253,24 @@ export class QuestDBService {
 
   private async ensurePaymentHistoryPaymentStatus(): Promise<void> {
     try {
-      // Add paymentStatus column if missing
-      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS paymentStatus BOOLEAN DEFAULT false;`);
+      // Add paymentStatus column if missing (no DEFAULT in QuestDB ALTER)
+      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS paymentStatus BOOLEAN;`);
       logger.debug(`✅ payment_history paymentStatus column ensured`);
     } catch (e) {
       if (config.questdb.diagnosticsVerbose) {
         logger.debug(`ℹ️ payment_history paymentStatus ensure skip`);
+      }
+    }
+  }
+
+  private async ensureUserPurchaseAddress(): Promise<void> {
+    try {
+      // Add address column if missing
+      await this.pgClient.query(`ALTER TABLE userPurchase ADD COLUMN IF NOT EXISTS address SYMBOL;`);
+      logger.debug(`✅ userPurchase address column ensured`);
+    } catch (e) {
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug(`ℹ️ userPurchase address ensure skip`);
       }
     }
   }
@@ -392,7 +409,7 @@ export class QuestDBService {
           let values: any[];
 
           if (table === 'payment_history') {
-            // INSERT for payment_history (no transactionId, paymentStatus default false or set to false)
+            // INSERT for payment_history (paymentStatus set to false explicitly)
             sql = `INSERT INTO payment_history (
               timestamp, twitterId, amount, serviceType, chain, address, publicKey, privateKey, paymentStatus, status
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`;
@@ -408,9 +425,9 @@ export class QuestDBService {
             const nextId = (checkCount.rows[0]?.c || 0) + 1;
 
             sql = `INSERT INTO userPurchase (
-              id, twitterId, amount, created_at, expire_at, serviceType
-            ) VALUES ($1, $2, $3, $4, $5, $6);`;
-            values = [nextId, twitterId, amount, nowIso, expireAtIso, serviceType];
+              id, twitterId, amount, address, created_at, expire_at, serviceType
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7);`;
+            values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType];
           } else {
             // Fallback, though unreachable
             throw new Error(`Unexpected table in special handling: ${table}`);
