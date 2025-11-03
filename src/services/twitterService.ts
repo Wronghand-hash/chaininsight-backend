@@ -63,7 +63,7 @@ class TwitterService {
         }
     }
 
-    generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read', 'tweet.read', 'tweet.write', 'offline.access']): { url: string; state: string; codeVerifier: string; codeChallenge: string } {
+    generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read']): { url: string; state: string; codeVerifier: string; codeChallenge: string } {
         logger.debug('generateLoginUrl: Using redirectUri:', redirectUri, 'scopes:', scopes);
         if (!config.twitter?.clientId) {
             logger.error('generateLoginUrl: Twitter clientId is required for OAuth2 login');
