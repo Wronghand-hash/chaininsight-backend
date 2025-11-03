@@ -1,7 +1,12 @@
+// routes/kolsLeaderboardRouter.ts (updated with new Twitter auth routes added at the end)
+// Note: I've added the Twitter auth routes here as per "add routes to this file", but in a real app, consider a separate auth router for organization.
+// If this is unintended, move them to a new auth.routes.ts and mount separately in your main app.ts.
+
 import { Router, Request, Response, NextFunction } from 'express';
 import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service'; // Adjust path as needed
+import { generateTwitterLoginUrl, handleTwitterCallback } from '../services/twitter.auth'; // New import for auth functions
 
 const kolsLeaderboardRouter = Router();
 
@@ -135,6 +140,68 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
         next(error);
     }
 });
+
+/**
+ * @swagger
+ * /kol/auth/twitter/login:
+ *   get:
+ *     summary: Generate Twitter OAuth2 login URL
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: redirectUri
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Callback URL after Twitter auth (must match app settings)
+ *     responses:
+ *       200:
+ *         description: Twitter login URL generated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 url:
+ *                   type: string
+ *                 state:
+ *                   type: string
+ *       400:
+ *         description: Missing redirectUri
+ *       500:
+ *         description: Failed to generate URL
+ */
+kolsLeaderboardRouter.get('/auth/twitter/login', generateTwitterLoginUrl);
+
+/**
+ * @swagger
+ * /kol/auth/twitter/callback:
+ *   get:
+ *     summary: Handle Twitter OAuth2 callback (server-side)
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Authorization code from Twitter
+ *       - in: query
+ *         name: state
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: CSRF state token
+ *       - in: query
+ *         name: redirectUri
+ *         schema:
+ *           type: string
+ *         description: Optional callback URI
+ *     responses:
+ *       302:
+ *         description: Redirect to dashboard on success, or login with error
+ */
+kolsLeaderboardRouter.get('/auth/twitter/callback', handleTwitterCallback);
 
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
