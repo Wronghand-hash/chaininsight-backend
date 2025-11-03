@@ -37,9 +37,11 @@
     "zod": "^4.1.12"
   },
   "dependencies": {
+    "@solana/web3.js": "^1.98.4",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "cron": "^4.3.3",
+    "ethers": "^6.15.0",
     "kafkajs": "^2.2.4",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",

@@ -8,7 +8,6 @@ import { TokenInfoResponse } from '../models/token.types';
 // Supported chains
 type Chain = 'BSC' | 'ETH' | 'SOL';
 
-
 export class QuestDBService {
   private sender?: Sender;
   private pgClient: Client;
@@ -90,15 +89,15 @@ export class QuestDBService {
         recentSellerKols STRING,
         chain SYMBOL
     ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 30d;`;
-    
+
     try {
-        await this.pgClient.query(kolTradesCreateSql);
-        logger.debug(`✅ Table verified: kol_trades`);
-        logger.info('Note: Uniqueness for kol_trades enforced at application level (QuestDB does not support unique constraints)');
+      await this.pgClient.query(kolTradesCreateSql);
+      logger.debug(`✅ Table verified: kol_trades`);
+      logger.info('Note: Uniqueness for kol_trades enforced at application level (QuestDB does not support unique constraints)');
     } catch (error) {
-        logger.warn(`⚠️ Table setup warning for kol_trades:`, error);
-        // If table creation fails, we must stop, as the constraint step will also fail.
-        throw error;
+      logger.warn(`⚠️ Table setup warning for kol_trades:`, error);
+      // If table creation fails, we must stop, as the constraint step will also fail.
+      throw error;
     }
     // --- END kol_trades HANDLING ---
 
@@ -153,6 +152,33 @@ export class QuestDBService {
           updated_at TIMESTAMP,
           CTO STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
+      },
+      {
+        name: 'payment_history',
+        create: `CREATE TABLE IF NOT EXISTS payment_history (
+          timestamp TIMESTAMP,
+          twitterId STRING,
+          amount DOUBLE,
+          serviceType STRING,
+          chain SYMBOL,
+          address SYMBOL,
+          publicKey STRING,
+          privateKey STRING,  -- Store securely; consider encryption in production
+          paymentStatus BOOLEAN DEFAULT false,  -- Default to false
+          status STRING  -- e.g., 'completed', 'pending'
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
+      },
+      // New table: userPurchase
+      {
+        name: 'userPurchase',
+        create: `CREATE TABLE IF NOT EXISTS userPurchase (
+          id LONG,  -- Auto-increment or UUID as LONG
+          twitterId STRING,
+          amount DOUBLE,
+          created_at TIMESTAMP,
+          expire_at TIMESTAMP,
+          serviceType STRING
+        ) TIMESTAMP(created_at) PARTITION BY DAY${wal} ;`  // 1 year TTL for purchases
       }
     ];
 
@@ -168,6 +194,12 @@ export class QuestDBService {
 
     // Ensure token_metrics has the new columns if table existed before
     await this.ensureTokenMetricsColumns();
+
+    // Ensure userPurchase has an index or auto-id if needed (QuestDB limitations)
+    await this.ensureUserPurchaseId();
+
+    // Ensure payment_history has paymentStatus if table existed before
+    await this.ensurePaymentHistoryPaymentStatus();
 
     logger.info('✅ QuestDB tables created or verified');
   }
@@ -198,6 +230,30 @@ export class QuestDBService {
         if (config.questdb.diagnosticsVerbose) {
           logger.debug(`ℹ️ token_metrics column ensure skip: ${col.name}`);
         }
+      }
+    }
+  }
+
+  private async ensureUserPurchaseId(): Promise<void> {
+    try {
+      // Add id column if missing (QuestDB ALTER supports it)
+      await this.pgClient.query(`ALTER TABLE userPurchase ADD COLUMN IF NOT EXISTS id LONG;`);
+      logger.debug(`✅ userPurchase id column ensured`);
+    } catch (e) {
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug(`ℹ️ userPurchase id ensure skip`);
+      }
+    }
+  }
+
+  private async ensurePaymentHistoryPaymentStatus(): Promise<void> {
+    try {
+      // Add paymentStatus column if missing
+      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS paymentStatus BOOLEAN DEFAULT false;`);
+      logger.debug(`✅ payment_history paymentStatus column ensured`);
+    } catch (e) {
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug(`ℹ️ payment_history paymentStatus ensure skip`);
       }
     }
   }
@@ -319,9 +375,54 @@ export class QuestDBService {
           continue; // Skip to the next row
         }
 
+        // Special handling for new tables: payment_history and userPurchase
+        if (table === 'payment_history' || table === 'userPurchase') {
+          const nowIso = new Date().toISOString();
+          const ts = String(row.timestamp ?? nowIso);
+          const twitterId = String(row.twitterId || '');
+          const amount = row.amount != null ? Number(row.amount) : null;
+          const serviceType = String(row.serviceType || 'unknown');
+          const chain = String(row.chain || 'BSC');
+          const address = String(row.address || '');
+          const publicKey = String(row.publicKey || '');
+          const privateKey = String(row.privateKey || '');  // Store securely
+          const status = String(row.status || 'completed');
+
+          let sql: string;
+          let values: any[];
+
+          if (table === 'payment_history') {
+            // INSERT for payment_history (no transactionId, paymentStatus default false or set to false)
+            sql = `INSERT INTO payment_history (
+              timestamp, twitterId, amount, serviceType, chain, address, publicKey, privateKey, paymentStatus, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`;
+            values = [ts, twitterId, amount, serviceType, chain, address, publicKey, privateKey, false, status];
+          } else if (table === 'userPurchase') {
+            // Calculate expire_at: 1 month from created_at
+            const createdAt = new Date(nowIso);
+            const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));  // 30 days
+            const expireAtIso = expireAt.toISOString();
+
+            // For id, use a simple incremental or hash; here we use rowCount or generate
+            const checkCount = await this.pgClient.query('SELECT count(*) as c FROM userPurchase;');
+            const nextId = (checkCount.rows[0]?.c || 0) + 1;
+
+            sql = `INSERT INTO userPurchase (
+              id, twitterId, amount, created_at, expire_at, serviceType
+            ) VALUES ($1, $2, $3, $4, $5, $6);`;
+            values = [nextId, twitterId, amount, nowIso, expireAtIso, serviceType];
+          } else {
+            // Fallback, though unreachable
+            throw new Error(`Unexpected table in special handling: ${table}`);
+          }
+
+          await this.pgClient.query(sql, values);
+          continue;  // Skip to next row
+        }
+
         // Generic logic for all other tables
-        let sql: string;
-        let values: any[];
+        let sql: string = '';  // Initialize to silence TS "used before assigned"
+        let values: any[] = [];  // Initialize to silence TS "used before assigned"
 
         switch (table) {
           case 'kol_trades':
@@ -329,7 +430,7 @@ export class QuestDBService {
             const timestampIso = typeof row.timestamp === 'string'
               ? row.timestamp
               : new Date(Number(row.timestamp) * 1000).toISOString();
-            
+
             // Ensure kolId is passed as a number/long for the LONG column type
             const kolId = typeof row.kolId === 'string' ? parseInt(row.kolId, 10) : Number(row.kolId);
             const contract = String(row.contract || '');
