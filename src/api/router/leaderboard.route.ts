@@ -1,12 +1,11 @@
-// routes/kolsLeaderboardRouter.ts (updated with new Twitter auth routes added at the end)
-// Note: I've added the Twitter auth routes here as per "add routes to this file", but in a real app, consider a separate auth router for organization.
-// If this is unintended, move them to a new auth.routes.ts and mount separately in your main app.ts.
+// routes/kolsLeaderboardRouter.ts (updated with new Twitter auth routes for nonce flow)
+// Note: Added /init and /exchange for nonce-based flow; kept /login and /callback for hybrid use.
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service'; // Adjust path as needed
-import { generateTwitterLoginUrl, handleTwitterCallback } from '../services/twitter.auth'; // New import for auth functions
+import { generateTwitterLoginUrl, handleTwitterCallback } from '../services/twitter.auth'; // Updated import
 
 const kolsLeaderboardRouter = Router();
 
@@ -143,9 +142,40 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
 
 /**
  * @swagger
+ * /kol/auth/twitter/init:
+ *   get:
+ *     summary: Get nonce and auth URL for Twitter login (nonce flow)
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: redirectUri
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Client callback URI (e.g., yourapp.com/twitter-callback)
+ *     responses:
+ *       200:
+ *         description: Nonce and auth URL
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 url: { type: string }
+ *                 state: { type: string }  # Nonce for CSRF
+ *                 codeVerifier: { type: string }  # PKCE secret (store client-side temporarily)
+ *       400:
+ *         description: Missing redirectUri
+ *       500:
+ *         description: Failed to generate
+ */
+kolsLeaderboardRouter.get('/auth/twitter/init', generateTwitterLoginUrl);
+
+/**
+ * @swagger
  * /kol/auth/twitter/login:
  *   get:
- *     summary: Generate Twitter OAuth2 login URL
+ *     summary: Generate Twitter OAuth2 login URL (legacy/redirect flow)
  *     tags: [Auth]
  *     parameters:
  *       - in: query
@@ -177,7 +207,7 @@ kolsLeaderboardRouter.get('/auth/twitter/login', generateTwitterLoginUrl);
  * @swagger
  * /kol/auth/twitter/callback:
  *   get:
- *     summary: Handle Twitter OAuth2 callback (server-side)
+ *     summary: Handle Twitter OAuth2 callback (server-side, legacy)
  *     tags: [Auth]
  *     parameters:
  *       - in: query
