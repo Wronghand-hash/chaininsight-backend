@@ -43,8 +43,8 @@ export class SynchronousPaymentChecker {
             }
 
             let currentBalance = 0;
-            const pollIntervalMs = 5000;  // Poll every 5 seconds
-            const maxPollDurationMs = 300000;  // 5 minutes timeout
+            const pollIntervalMs = 3000;  // Poll every 3 seconds
+            const maxPollDurationMs = 3 * 60000;  // 3 minutes timeout
             const startTime = Date.now();
 
             while (Date.now() - startTime < maxPollDurationMs) {
