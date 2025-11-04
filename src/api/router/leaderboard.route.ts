@@ -162,7 +162,6 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *                 description: Payment amount
  *               serviceType:
  *                 type: string
- *                 description: Optional service type (default: x_alerts_service)
  *     responses:
  *       200:
  *         description: Wallet generated; streams updates (pending -> completed/timeout)
@@ -195,13 +194,6 @@ kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
  *   get:
  *     summary: Get nonce and auth URL for Twitter login (nonce flow)
  *     tags: [Auth]
- *     parameters:
- *       - in: query
- *         name: redirectUri
- *         required: true
- *         schema:
- *           type: string
- *         description: Client callback URI (e.g., yourapp.com/twitter-callback)
  *     responses:
  *       200:
  *         description: Nonce and auth URL

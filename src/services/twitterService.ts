@@ -2,20 +2,29 @@
 import { TwitterApi } from 'twitter-api-v2';
 import { logger } from '../utils/logger';
 import { config } from '../utils/config';
+import { redis } from '../utils/redisHelper';
+
+const REDIS_NONCE_PREFIX = 'twitter:oauth:nonce:';
+const NONCE_EXPIRY_SECONDS = 600;
 
 class TwitterService {
     private client: TwitterApi | null = null;
     private initialized = false;
 
-    // Store nonces temporarily (in-memory for demo; use Redis in prod)
-    private nonces: Map<string, { codeVerifier: string; timestamp: number }> = new Map();
+    public async getCodeVerifier(state: string): Promise<string | null> {
+        const redisKey = REDIS_NONCE_PREFIX + state;
+        logger.debug('getCodeVerifier: Looking up state in Redis:', redisKey);
 
-    public getCodeVerifier(state: string): string | null {
-        logger.debug('getCodeVerifier: Looking up state:', state.substring(0, 10) + '...');
-        const nonceData = this.nonces.get(state);
-        const verifier = nonceData ? nonceData.codeVerifier : null;
-        logger.debug('getCodeVerifier: Found verifier length:', verifier?.length || 0);
-        return verifier;
+        const codeVerifier = await redis.get(redisKey);
+
+        logger.debug('getCodeVerifier: Found verifier length:', codeVerifier?.length || 0);
+        return codeVerifier;
+    }
+
+    private async deleteNonce(state: string): Promise<void> {
+        const redisKey = REDIS_NONCE_PREFIX + state;
+        logger.debug('deleteNonce: Removing state from Redis:', redisKey);
+        await redis.del(redisKey);
     }
 
     async init() {
@@ -63,7 +72,7 @@ class TwitterService {
         }
     }
 
-    generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read', 'tweet.read']): { url: string; state: string; codeVerifier: string; codeChallenge: string } {
+    async generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read', 'tweet.read']): Promise<{ url: string; state: string; codeVerifier: string; codeChallenge: string }> {
         logger.debug('generateLoginUrl: Using redirectUri:', redirectUri, 'scopes:', scopes);
         if (!config.twitter?.clientId) {
             logger.error('generateLoginUrl: Twitter clientId is required for OAuth2 login');
@@ -79,40 +88,39 @@ class TwitterService {
 
         logger.debug('generateLoginUrl: Generated auth link, state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length, 'codeChallenge length:', codeChallenge.length);
 
-        // Store nonce (state) with codeVerifier (expires in 10 mins)
-        this.nonces.set(state, { codeVerifier, timestamp: Date.now() });
-        logger.debug('generateLoginUrl: Stored nonce for state:', state.substring(0, 10) + '...');
+        // Store nonce (state) with codeVerifier in Redis with an expiration time
+        const redisKey = REDIS_NONCE_PREFIX + state;
+        await redis.set(redisKey, codeVerifier, 'EX', NONCE_EXPIRY_SECONDS);
+        logger.debug(`generateLoginUrl: Stored nonce for state in Redis (${NONCE_EXPIRY_SECONDS}s expiry):`, state.substring(0, 10) + '...');
+
         return { url, state, codeVerifier, codeChallenge };
     }
 
     async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string }> {
         logger.debug('handleLoginCallback: Received code length:', code.length, 'state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length, 'redirectUri:', redirectUri);
 
-        // Verify nonce (state) exists and not expired
-        const stored = this.nonces.get(state);
-        logger.debug('handleLoginCallback: Found stored nonce:', !!stored);
+        // Get codeVerifier from Redis
+        const storedCodeVerifier = await this.getCodeVerifier(state);
+        logger.debug('handleLoginCallback: Found stored codeVerifier:', !!storedCodeVerifier);
 
-        if (!stored) {
+        if (!storedCodeVerifier) {
+            // Redis TTL handles expiration: if key is missing, it's either expired or invalid
             logger.error('handleLoginCallback: Invalid or missing nonce (state). Session expired.');
             throw new Error('Invalid or missing nonce (state). Session expired.');
         }
 
-        // 10 mins validity check
-        if (Date.now() - stored.timestamp > 600000) {
-            this.nonces.delete(state); // Clean up expired state
-            logger.error('handleLoginCallback: Expired nonce (state). Please try logging in again.');
-            throw new Error('Expired nonce (state). Please try logging in again.');
-        }
-
-        if (stored.codeVerifier !== codeVerifier) {
-            logger.error('handleLoginCallback: Nonce mismatch - possible CSRF attack or incorrect codeVerifier used.');
-            throw new Error('Nonce mismatch - possible CSRF attack or incorrect codeVerifier used.');
+        if (storedCodeVerifier !== codeVerifier) {
+            // PKCE mismatch or CSRF detected
+            logger.error('handleLoginCallback: Code Verifier mismatch - possible CSRF attack or incorrect codeVerifier used.');
+            // Clean up the invalid state
+            await this.deleteNonce(state);
+            throw new Error('Code Verifier mismatch - possible CSRF attack or incorrect codeVerifier used.');
         }
 
         logger.debug('handleLoginCallback: Nonce verification successful');
 
         // Clean up nonce immediately after successful verification
-        this.nonces.delete(state);
+        await this.deleteNonce(state);
         logger.debug('handleLoginCallback: Cleaned up nonce for state:', state.substring(0, 10) + '...');
 
         if (!config.twitter?.clientId || !config.twitter?.clientSecret) {
@@ -123,14 +131,14 @@ class TwitterService {
         try {
             const appClient = new TwitterApi({
                 clientId: config.twitter.clientId,
-                clientSecret: config.twitter.clientSecret, // <-- CRITICAL FIX: Changed from clientSecret
+                clientSecret: config.twitter.clientSecret,
             });
             logger.debug('handleLoginCallback: Starting OAuth2 token exchange');
 
             // --- DEBUG: LOGGING PKCE PARAMETERS ---
             logger.debug('handleLoginCallback: Exchange Payload:', {
-                code: code.substring(0, 10) + '...', // Log snippet of the code
-                codeVerifier: codeVerifier.substring(0, 10) + '...', // Log snippet of the verifier
+                code: code.substring(0, 10) + '...',
+                codeVerifier: codeVerifier.substring(0, 10) + '...',
                 redirectUri,
             });
             // ----------------------------------------

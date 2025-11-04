@@ -9,16 +9,13 @@ const NGROK_REDIRECT_URI = 'https://tiesha-postrorse-blindfoldedly.ngrok-free.de
 // 1. Get nonce/auth URL (init for nonce flow)
 export const generateTwitterLoginUrl = async (req: Request, res: Response): Promise<void> => {
     try {
-        // CRITICAL FIX: Standardize redirectUri to the constant NGROK_REDIRECT_URI.
-        // This ensures the URI used in the initial request exactly matches the one in the token exchange.
         const redirectUri = NGROK_REDIRECT_URI;
         logger.debug('generateTwitterLoginUrl: Final processed redirectUri:', redirectUri);
 
-        const scopes = ['users.read' , 'tweet.read'];
+        const scopes = ['users.read', 'tweet.read'];
         logger.debug('generateTwitterLoginUrl: Using scopes:', scopes);
 
-        // The service generates the state and codeVerifier and stores the verifier internally
-        const { url, state, codeVerifier } = twitterService.generateLoginUrl(redirectUri, scopes);
+        const { url, state, codeVerifier } = await twitterService.generateLoginUrl(redirectUri, scopes);
         logger.debug('generateTwitterLoginUrl: Generated login URL, state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length);
 
         res.json({ url, state, codeVerifier });
@@ -35,7 +32,6 @@ export const handleTwitterExchange = async (req: Request, res: Response, next: N
         const { code, state, codeVerifier } = req.body;
         logger.debug('handleTwitterExchange: Received code length:', code?.length, 'state:', state?.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier?.length);
 
-        // Use the single registered HTTPS ngrok URI for the exchange step
         const finalRedirectUri = NGROK_REDIRECT_URI;
         logger.debug('handleTwitterExchange: Using finalRedirectUri:', finalRedirectUri);
 
@@ -62,8 +58,7 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
             return;
         }
 
-        // Retrieve the codeVerifier using the state from the service
-        const codeVerifier = twitterService.getCodeVerifier(state as string);
+        const codeVerifier = await twitterService.getCodeVerifier(state as string);
         logger.debug('handleTwitterCallback: Retrieved codeVerifier length:', codeVerifier?.length);
 
         if (!codeVerifier) {
@@ -73,11 +68,9 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
             return;
         }
 
-        // Use the single registered HTTPS ngrok URI for the token exchange
         const redirectUri = NGROK_REDIRECT_URI;
         logger.debug('handleTwitterCallback: Using redirectUri for exchange:', redirectUri);
 
-        // Complete the PKCE exchange
         const result = await twitterService.handleLoginCallback(code as string, codeVerifier, state as string, redirectUri);
         logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
 
