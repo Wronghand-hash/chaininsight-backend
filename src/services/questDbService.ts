@@ -32,23 +32,17 @@ export class QuestDBService {
       }
       return;
     }
-
     if (this.initPromise) {
       return this.initPromise;
     }
-
     this.initPromise = (async () => {
       try {
         logger.info('Initializing QuestDB...');
         await this.pgClient.connect();
         await this.pgClient.query('SELECT 1 as ping;');
-
         const tcpConfig = `tcp::addr=${config.questdb.host}:${config.questdb.fastPort};`;
         this.sender = await Sender.fromConfig(tcpConfig);
-
-        // Optional connect check
         await this.sender.connect();
-
         await this.createTables();
         this.initialized = true;
         logger.info('✅ QuestDB initialized successfully (PG + Sender)');
@@ -57,17 +51,16 @@ export class QuestDBService {
         throw error;
       }
     })();
-
     return this.initPromise;
   }
 
   private async createTables(): Promise<void> {
     const wal = config.questdb.enableWal ? ' WAL' : '';
 
-    // --- 1. HANDLE kol_trades TABLE CREATION (NO UNIQUE INDEX SUPPORT IN QUEStDB) ---
+    // kol_trades (no unique index in QuestDB; enforce at app level)
     const kolTradesCreateSql = `CREATE TABLE IF NOT EXISTS kol_trades (
         timestamp TIMESTAMP,
-        kolId LONG, 
+        kolId LONG,
         kolName STRING,
         kolAvatar STRING,
         kolTwitterId STRING,
@@ -76,7 +69,7 @@ export class QuestDBService {
         amount STRING,
         usdtPrice STRING,
         initialPrice STRING,
-        txHash SYMBOL, 
+        txHash SYMBOL,
         fromToken STRING,
         fromTokenAddress SYMBOL,
         fromTokenCount STRING,
@@ -88,20 +81,11 @@ export class QuestDBService {
         recentBuyerKols STRING,
         recentSellerKols STRING,
         chain SYMBOL
-    ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 30d;`;
+      ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`;
+    await this.pgClient.query(kolTradesCreateSql);
+    logger.debug(`✅ Table created: kol_trades`);
 
-    try {
-      await this.pgClient.query(kolTradesCreateSql);
-      logger.debug(`✅ Table verified: kol_trades`);
-      logger.info('Note: Uniqueness for kol_trades enforced at application level (QuestDB does not support unique constraints)');
-    } catch (error) {
-      logger.warn(`⚠️ Table setup warning for kol_trades:`, error);
-      // If table creation fails, we must stop, as the constraint step will also fail.
-      throw error;
-    }
-    // --- END kol_trades HANDLING ---
-
-    // --- 2. HANDLE ALL OTHER TABLES IN A LOOP ---
+    // Other tables
     const tables = [
       {
         name: 'prices',
@@ -111,7 +95,7 @@ export class QuestDBService {
           priceUsd DOUBLE,
           volume DOUBLE,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
       {
         name: 'token_info',
@@ -120,7 +104,7 @@ export class QuestDBService {
           contract SYMBOL,
           data STRING,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 1d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
       {
         name: 'security_labels',
@@ -129,7 +113,7 @@ export class QuestDBService {
           address SYMBOL,
           data STRING,
           chain SYMBOL
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 7d;`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
       {
         name: 'token_metrics',
@@ -153,7 +137,6 @@ export class QuestDBService {
           CTO STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
-      // Updated table: payment_history (added wallet STRING)
       {
         name: 'payment_history',
         create: `CREATE TABLE IF NOT EXISTS payment_history (
@@ -168,9 +151,8 @@ export class QuestDBService {
           privateKey STRING,  -- Store securely; consider encryption in production
           paymentStatus BOOLEAN,
           status STRING  -- e.g., 'completed', 'pending'
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal} TTL 90d;`  // Longer TTL for history
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
-      // Updated table: userPurchase (added address SYMBOL)
       {
         name: 'userPurchase',
         create: `CREATE TABLE IF NOT EXISTS userPurchase (
@@ -181,114 +163,16 @@ export class QuestDBService {
           created_at TIMESTAMP,
           expire_at TIMESTAMP,
           serviceType STRING
-        ) TIMESTAMP(created_at) PARTITION BY DAY${wal} TTL 365d;`  // 1 year TTL for purchases
+        ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`
       }
     ];
 
     for (const table of tables) {
-      try {
-        await this.pgClient.query(table.create);
-        logger.debug(`✅ Table verified: ${table.name}`);
-      } catch (error) {
-        logger.warn(`⚠️ Table setup warning for ${table.name}:`, error);
-      }
+      await this.pgClient.query(table.create);
+      logger.debug(`✅ Table created: ${table.name}`);
     }
-    // --- END OTHER TABLES HANDLING ---
 
-    // Ensure token_metrics has the new columns if table existed before
-    await this.ensureTokenMetricsColumns();
-
-    // Ensure userPurchase has an index or auto-id if needed (QuestDB limitations)
-    await this.ensureUserPurchaseId();
-
-    // Ensure payment_history has paymentStatus if table existed before
-    await this.ensurePaymentHistoryPaymentStatus();
-
-    // Ensure userPurchase has address column if table existed before
-    await this.ensureUserPurchaseAddress();
-
-    // Ensure payment_history has wallet column if table existed before
-    await this.ensurePaymentHistoryWallet();
-
-    logger.info('✅ QuestDB tables created or verified');
-  }
-
-  private async ensureTokenMetricsColumns(): Promise<void> {
-    const adds: Array<{ name: string; type: string }> = [
-      { name: 'price_usd', type: 'DOUBLE' },
-      { name: 'market_cap', type: 'DOUBLE' },
-      { name: 'fdv', type: 'DOUBLE' },
-      { name: 'volume_5m', type: 'DOUBLE' },
-      { name: 'volume_24h', type: 'DOUBLE' },
-      { name: 'call_count', type: 'INT' },
-      { name: 'kol_calls_count', type: 'INT' },
-      { name: 'mention_user_count', type: 'INT' },
-      { name: 'calls_data', type: 'STRING' },
-      { name: 'community_data', type: 'STRING' },
-      { name: 'narrative_data', type: 'STRING' },
-      { name: 'title', type: 'STRING' },
-      { name: 'updated_at', type: 'TIMESTAMP' },
-      { name: 'CTO', type: 'STRING' },
-    ];
-    for (const col of adds) {
-      try {
-        await this.pgClient.query(`ALTER TABLE token_metrics ADD COLUMN ${col.name} ${col.type};`);
-        logger.debug(`✅ token_metrics column added: ${col.name}`);
-      } catch (e) {
-        // Likely already exists; keep silent unless diagnosticsVerbose
-        if (config.questdb.diagnosticsVerbose) {
-          logger.debug(`ℹ️ token_metrics column ensure skip: ${col.name}`);
-        }
-      }
-    }
-  }
-
-  private async ensureUserPurchaseId(): Promise<void> {
-    try {
-      // Add id column if missing (QuestDB ALTER supports it)
-      await this.pgClient.query(`ALTER TABLE userPurchase ADD COLUMN IF NOT EXISTS id LONG;`);
-      logger.debug(`✅ userPurchase id column ensured`);
-    } catch (e) {
-      if (config.questdb.diagnosticsVerbose) {
-        logger.debug(`ℹ️ userPurchase id ensure skip`);
-      }
-    }
-  }
-
-  private async ensurePaymentHistoryPaymentStatus(): Promise<void> {
-    try {
-      // Add paymentStatus column if missing (no DEFAULT in QuestDB ALTER)
-      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS paymentStatus BOOLEAN;`);
-      logger.debug(`✅ payment_history paymentStatus column ensured`);
-    } catch (e) {
-      if (config.questdb.diagnosticsVerbose) {
-        logger.debug(`ℹ️ payment_history paymentStatus ensure skip`);
-      }
-    }
-  }
-
-  private async ensureUserPurchaseAddress(): Promise<void> {
-    try {
-      // Add address column if missing
-      await this.pgClient.query(`ALTER TABLE userPurchase ADD COLUMN IF NOT EXISTS address SYMBOL;`);
-      logger.debug(`✅ userPurchase address column ensured`);
-    } catch (e) {
-      if (config.questdb.diagnosticsVerbose) {
-        logger.debug(`ℹ️ userPurchase address ensure skip`);
-      }
-    }
-  }
-
-  private async ensurePaymentHistoryWallet(): Promise<void> {
-    try {
-      // Add wallet column if missing
-      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS wallet STRING;`);
-      logger.debug(`✅ payment_history wallet column ensured`);
-    } catch (e) {
-      if (config.questdb.diagnosticsVerbose) {
-        logger.debug(`ℹ️ payment_history wallet ensure skip`);
-      }
-    }
+    logger.info('✅ QuestDB tables created');
   }
 
   private ensureInit(): void {
@@ -303,7 +187,7 @@ export class QuestDBService {
 
     try {
       for (const row of rows) {
-        // Special handling for token_metrics with SELECT-then-UPSERT logic
+        // Special upsert for token_metrics
         if (table === 'token_metrics') {
           const nowIso = new Date().toISOString();
           const ts = String(row.timestamp ?? nowIso);
@@ -314,21 +198,8 @@ export class QuestDBService {
           const fdv = row.fdv != null ? Number(row.fdv) : null;
           const volume5m = row.volume_5m != null ? Number(row.volume_5m) : null;
           const volume24h = row.volume_24h != null ? Number(row.volume_24h) : null;
-          const title = row.title != null ? String(row.title) : null;
-          const CTOStr = row.CTO != null ? String(row.CTO) : null;
-          const hasPriceUsd = Object.prototype.hasOwnProperty.call(row, 'price_usd');
-          const hasMarketCap = Object.prototype.hasOwnProperty.call(row, 'market_cap');
-          const hasFdv = Object.prototype.hasOwnProperty.call(row, 'fdv');
-          const hasVolume5m = Object.prototype.hasOwnProperty.call(row, 'volume_5m');
-          const hasVolume24h = Object.prototype.hasOwnProperty.call(row, 'volume_24h');
-          const hasTitle = Object.prototype.hasOwnProperty.call(row, 'title');
-          const hasCTO = Object.prototype.hasOwnProperty.call(row, 'CTO');
-          const hasCallCount = Object.prototype.hasOwnProperty.call(row, 'call_count');
-          const hasKolCallsCount = Object.prototype.hasOwnProperty.call(row, 'kol_calls_count');
-          const hasMentionUserCount = Object.prototype.hasOwnProperty.call(row, 'mention_user_count');
-          const hasCallsData = Object.prototype.hasOwnProperty.call(row, 'calls_data');
-          const hasCommunityData = Object.prototype.hasOwnProperty.call(row, 'community_data');
-          const hasNarrativeData = Object.prototype.hasOwnProperty.call(row, 'narrative_data');
+          const title = row.title != null ? String(row.title) : '';
+          const CTOStr = row.CTO != null ? String(row.CTO) : '';
           const callCount = Number(row.call_count || 0);
           const kolCallsCount = Number(row.kol_calls_count || 0);
           const mentionUserCount = Number(row.mention_user_count || 0);
@@ -336,79 +207,46 @@ export class QuestDBService {
           const communityData = JSON.stringify(row.community_data || {});
           const narrativeData = JSON.stringify(row.narrative_data || {});
 
-          // Check existence (binds are fine for SELECT)
           const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = $1 AND chain = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [contract, chain]);
-          const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
+          const exists = checkRes.rows[0]?.c > 0;
 
           if (exists) {
-            // Perform UPDATE without bind variables to avoid QuestDB PG limitation
             const esc = (s: string) => s.replace(/'/g, "''");
             const nullable = (n: number | null) => (n == null || Number.isNaN(n) ? 'NULL' : String(n));
-            const setParts: string[] = [];
-            if (hasPriceUsd) setParts.push(`price_usd = ${nullable(priceUsd)}`);
-            if (hasMarketCap) setParts.push(`market_cap = ${nullable(marketCap)}`);
-            if (hasFdv) setParts.push(`fdv = ${nullable(fdv)}`);
-            if (hasVolume5m) setParts.push(`volume_5m = ${nullable(volume5m)}`);
-            if (hasVolume24h) setParts.push(`volume_24h = ${nullable(volume24h)}`);
-            if (hasTitle) setParts.push(`title = ${title == null ? 'null' : `'${esc(title)}'`}`);
-            if (hasCTO) setParts.push(`CTO = ${CTOStr == null ? 'null' : `'${esc(CTOStr)}'`}`);
-            // Conditionally update aggregate fields
-            if (hasCallCount) setParts.push(`call_count = ${callCount}`);
-            if (hasKolCallsCount) setParts.push(`kol_calls_count = ${kolCallsCount}`);
-            if (hasMentionUserCount) setParts.push(`mention_user_count = ${mentionUserCount}`);
-            if (hasCallsData) setParts.push(`calls_data = '${esc(callsData)}'`);
-            if (hasCommunityData) setParts.push(`community_data = '${esc(communityData)}'`);
-            if (hasNarrativeData) setParts.push(`narrative_data = '${esc(narrativeData)}'`);
-            // Always update timestamp
-            setParts.push(`updated_at = '${esc(nowIso)}'`);
+            const setParts: string[] = [
+              `updated_at = '${esc(nowIso)}'`
+            ];
+            if (row.price_usd != null) setParts.push(`price_usd = ${nullable(priceUsd)}`);
+            if (row.market_cap != null) setParts.push(`market_cap = ${nullable(marketCap)}`);
+            if (row.fdv != null) setParts.push(`fdv = ${nullable(fdv)}`);
+            if (row.volume_5m != null) setParts.push(`volume_5m = ${nullable(volume5m)}`);
+            if (row.volume_24h != null) setParts.push(`volume_24h = ${nullable(volume24h)}`);
+            if (row.title != null) setParts.push(`title = '${esc(title)}'`);
+            if (row.CTO != null) setParts.push(`CTO = '${esc(CTOStr)}'`);
+            if (row.call_count != null) setParts.push(`call_count = ${callCount}`);
+            if (row.kol_calls_count != null) setParts.push(`kol_calls_count = ${kolCallsCount}`);
+            if (row.mention_user_count != null) setParts.push(`mention_user_count = ${mentionUserCount}`);
+            if (row.calls_data != null) setParts.push(`calls_data = '${esc(callsData)}'`);
+            if (row.community_data != null) setParts.push(`community_data = '${esc(communityData)}'`);
+            if (row.narrative_data != null) setParts.push(`narrative_data = '${esc(narrativeData)}'`);
+
             const updateSql = `UPDATE token_metrics SET ${setParts.join(', ')} WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
             await this.pgClient.query(updateSql);
           } else {
-            // First write: INSERT with binds (works over PG wire)
             const insertSql = `INSERT INTO token_metrics (
               timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h,
               call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, title, updated_at, CTO
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9,
-              $10, $11, $12, $13, $14, $15, $16, $17
-            );`;
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);`;
             await this.pgClient.query(insertSql, [
-              ts,
-              contract,
-              chain,
-              priceUsd,
-              marketCap,
-              fdv,
-              volume5m,
-              volume24h,
-              callCount,
-              kolCallsCount,
-              mentionUserCount,
-              callsData,
-              communityData,
-              narrativeData,
-              title,
-              nowIso,
-              CTOStr,
+              ts, contract, chain, priceUsd, marketCap, fdv, volume5m, volume24h,
+              callCount, kolCallsCount, mentionUserCount, callsData, communityData, narrativeData, title, nowIso, CTOStr
             ]);
           }
-
-          if (config.questdb.diagnosticsVerbose) {
-            try {
-              const total = await this.pgClient.query('SELECT count(*) AS total FROM token_metrics;');
-              logger.debug(`[QuestDB] token_metrics total=${total?.rows?.[0]?.total ?? 'N/A'}`);
-              const sample = await this.pgClient.query(`SELECT * FROM token_metrics ORDER BY updated_at DESC LIMIT 5;`);
-              logger.debug(`[QuestDB] token_metrics latest sample=${JSON.stringify(sample?.rows ?? [])}`);
-            } catch (diagError) {
-              logger.warn('⚠️ token_metrics diagnostic query failed', diagError);
-            }
-          }
-
-          continue; // Skip to the next row
+          continue;
         }
 
-        // Special handling for new tables: payment_history and userPurchase
+        // Special insert for payment_history and userPurchase
         if (table === 'payment_history' || table === 'userPurchase') {
           const nowIso = new Date().toISOString();
           const ts = String(row.timestamp ?? nowIso);
@@ -419,146 +257,72 @@ export class QuestDBService {
           const wallet = String(row.wallet || '');
           const address = String(row.address || '');
           const publicKey = String(row.publicKey || '');
-          const privateKey = String(row.privateKey || '');  // Store securely
+          const privateKey = String(row.privateKey || '');
           const status = String(row.status || 'completed');
 
           let sql: string;
           let values: any[];
-
           if (table === 'payment_history') {
-            // INSERT for payment_history (paymentStatus set to false explicitly)
-            sql = `INSERT INTO payment_history (
-              timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`;
+            sql = `INSERT INTO payment_history (timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`;
             values = [ts, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status];
-          } else if (table === 'userPurchase') {
-            // Calculate expire_at: 1 month from created_at
+          } else {
             const createdAt = new Date(nowIso);
-            const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));  // 30 days
+            const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));
             const expireAtIso = expireAt.toISOString();
-
-            // For id, use a simple incremental or hash; here we use rowCount or generate
             const checkCount = await this.pgClient.query('SELECT count(*) as c FROM userPurchase;');
             const nextId = (checkCount.rows[0]?.c || 0) + 1;
-
-            sql = `INSERT INTO userPurchase (
-              id, twitterId, amount, address, created_at, expire_at, serviceType
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7);`;
+            sql = `INSERT INTO userPurchase (id, twitterId, amount, address, created_at, expire_at, serviceType)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7);`;
             values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType];
-          } else {
-            // Fallback, though unreachable
-            throw new Error(`Unexpected table in special handling: ${table}`);
           }
-
           await this.pgClient.query(sql, values);
-          continue;  // Skip to next row
+          continue;
         }
 
-        // Generic logic for all other tables
-        let sql: string = '';  // Initialize to silence TS "used before assigned"
-        let values: any[] = [];  // Initialize to silence TS "used before assigned"
+        // Generic inserts
+        let sql: string;
+        let values: any[];
+        const timestampIso = typeof row.timestamp === 'string' ? row.timestamp : new Date(Number(row.timestamp) * 1000).toISOString();
 
         switch (table) {
           case 'kol_trades':
-            // Ensure timestamp is a valid ISO string for TIMESTAMP column
-            const timestampIso = typeof row.timestamp === 'string'
-              ? row.timestamp
-              : new Date(Number(row.timestamp) * 1000).toISOString();
-
-            // Ensure kolId is passed as a number/long for the LONG column type
             const kolId = typeof row.kolId === 'string' ? parseInt(row.kolId, 10) : Number(row.kolId);
             const contract = String(row.contract || '');
             const txHash = String(row.txHash || '');
-
-            // Check for existence to enforce uniqueness (QuestDB does not support unique constraints)
+            // Check uniqueness (app-level)
             const checkSql = `SELECT count(*) as c FROM kol_trades WHERE kolId = $1 AND contract = $2 AND txHash = $3;`;
             const checkRes = await this.pgClient.query(checkSql, [kolId, contract, txHash]);
-            const exists = checkRes.rows[0] && checkRes.rows[0].c > 0;
-
-            if (exists) {
-              if (config.questdb.diagnosticsVerbose) {
-                logger.debug(`[QuestDB] Skipping duplicate kol_trade: kolId=${kolId}, contract=${contract}, txHash=${txHash}`);
-              }
-              continue; // Skip to next row
+            if (checkRes.rows[0]?.c > 0) {
+              if (config.questdb.diagnosticsVerbose) logger.debug(`Skipping duplicate kol_trade: kolId=${kolId}, contract=${contract}, txHash=${txHash}`);
+              continue;
             }
-
             sql = `INSERT INTO kol_trades (
               timestamp, kolId, kolName, kolAvatar, kolTwitterId, contract, action, amount, usdtPrice, initialPrice, txHash,
               fromToken, fromTokenAddress, fromTokenCount, toToken, toTokenAddress, toTokenCount, toTokenRemainCount,
               walletType, recentBuyerKols, recentSellerKols, chain
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22);`;
             values = [
-              timestampIso,
-              kolId, // LONG
-              String(row.kolName || ''),
-              String(row.kolAvatar || ''),
-              String(row.kolTwitterId || ''),
-              contract, // SYMBOL
-              String(row.action || 'unknown'), // SYMBOL
-              String(row.amount || ''),
-              String(row.usdtPrice || ''),
-              String(row.initialPrice || ''),
-              txHash, // SYMBOL
-              String(row.fromToken || ''),
-              String(row.fromTokenAddress || ''), // SYMBOL
-              String(row.fromTokenCount || ''),
-              String(row.toToken || ''),
-              String(row.toTokenAddress || ''), // SYMBOL
-              String(row.toTokenCount || ''),
-              String(row.toTokenRemainCount || ''),
-              Number(row.walletType || 0),
-              JSON.stringify(row.recentBuyerKols || []),
-              JSON.stringify(row.recentSellerKols || []),
-              String(row.chain || 'BSC') // SYMBOL
+              timestampIso, kolId, String(row.kolName || ''), String(row.kolAvatar || ''), String(row.kolTwitterId || ''),
+              contract, String(row.action || 'unknown'), String(row.amount || ''), String(row.usdtPrice || ''), String(row.initialPrice || ''),
+              txHash, String(row.fromToken || ''), String(row.fromTokenAddress || ''), String(row.fromTokenCount || ''),
+              String(row.toToken || ''), String(row.toTokenAddress || ''), String(row.toTokenCount || ''), String(row.toTokenRemainCount || ''),
+              Number(row.walletType || 0), JSON.stringify(row.recentBuyerKols || []), JSON.stringify(row.recentSellerKols || []),
+              String(row.chain || 'BSC')
             ];
             break;
-
           case 'prices':
-            // Ensure timestamp is ISO string
-            const priceTsIso = typeof row.timestamp === 'string'
-              ? row.timestamp
-              : new Date(Number(row.timestamp) * 1000).toISOString();
-            sql = `INSERT INTO prices (timestamp, contract, priceUsd, volume, chain)
-                    VALUES ($1,$2,$3,$4,$5);`;
-            values = [
-              priceTsIso,
-              String(row.contract),
-              row.priceUsd != null ? Number(row.priceUsd) : null,
-              row.volume != null ? Number(row.volume) : null,
-              String(row.chain)
-            ];
+            sql = `INSERT INTO prices (timestamp, contract, priceUsd, volume, chain) VALUES ($1,$2,$3,$4,$5);`;
+            values = [timestampIso, String(row.contract), row.priceUsd != null ? Number(row.priceUsd) : null, row.volume != null ? Number(row.volume) : null, String(row.chain)];
             break;
-
           case 'token_info':
-            // Ensure timestamp is ISO string
-            const infoTsIso = typeof row.timestamp === 'string'
-              ? row.timestamp
-              : new Date(Number(row.timestamp) * 1000).toISOString();
-            sql = `INSERT INTO token_info (timestamp, contract, data, chain)
-                    VALUES ($1,$2,$3,$4);`;
-            values = [
-              infoTsIso,
-              String(row.contract),
-              String(row.data),
-              String(row.chain)
-            ];
+            sql = `INSERT INTO token_info (timestamp, contract, data, chain) VALUES ($1,$2,$3,$4);`;
+            values = [timestampIso, String(row.contract), String(row.data), String(row.chain)];
             break;
-
           case 'security_labels':
-            // Ensure timestamp is ISO string
-            const labelTsIso = typeof row.timestamp === 'string'
-              ? row.timestamp
-              : new Date(Number(row.timestamp) * 1000).toISOString();
-            sql = `INSERT INTO security_labels (timestamp, address, data, chain)
-                    VALUES ($1,$2,$3,$4);`;
-            values = [
-              labelTsIso,
-              String(row.address),
-              String(row.data),
-              String(row.chain)
-            ];
+            sql = `INSERT INTO security_labels (timestamp, address, data, chain) VALUES ($1,$2,$3,$4);`;
+            values = [timestampIso, String(row.address), String(row.data), String(row.chain)];
             break;
-
           default:
             throw new Error(`Unsupported table: ${table}`);
         }
@@ -568,15 +332,10 @@ export class QuestDBService {
         }
         await this.pgClient.query(sql, values);
       }
-
       if (config.questdb.diagnosticsVerbose) {
         logger.debug(`✅ Inserted ${rows.length} rows into ${table}`);
       }
     } catch (error) {
-      // Error code '23505' is often the PostgreSQL code for a unique violation.
-      // QuestDB uses '42710' for "duplicate object" but sometimes other codes.
-      // It is critical to confirm the QuestDB error code for unique constraint violations
-      // to properly handle the Kafka at-least-once delivery duplicates here.
       logger.error(`❌ PG insert failed for ${table}`, error);
       throw error;
     }
@@ -589,7 +348,6 @@ export class QuestDBService {
     if (!this.initialized) {
       await this.init();
     }
-
     const kolCallInfo = data.community?.kolCallInfo;
     console.log('kolCallInfo', kolCallInfo);
     const normContract = (contractAddress || '').toLowerCase();
@@ -604,10 +362,6 @@ export class QuestDBService {
     let cto: string | null = null;
 
     if (dexscreenerPayload) {
-      try {
-        logger.info(`[Dexscreener] full payload for ${contractAddress}: ${JSON.stringify(dexscreenerPayload)}`);
-      } catch { }
-
       const pair = dexscreenerPayload?.pairs?.[0] || null;
       price_usd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
       market_cap = pair?.marketCap != null ? Number(pair.marketCap) : null;
@@ -615,7 +369,6 @@ export class QuestDBService {
       volume_5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
       volume_24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
       cto = pair?.info ? JSON.stringify(pair.info) : null;
-
       logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${price_usd} marketCap=${market_cap} fdv=${fdv} vol5m=${volume_5m} vol24h=${volume_24h}`);
     }
 
@@ -626,7 +379,7 @@ export class QuestDBService {
       updated_at: now,
     };
 
-    // Always include dexscreener fields if payload provided
+    // Add dexscreener fields if provided
     if (dexscreenerPayload) {
       row.price_usd = price_usd;
       row.market_cap = market_cap;
@@ -636,7 +389,7 @@ export class QuestDBService {
       row.CTO = cto;
     }
 
-    // Include chaininsight fields only if data has relevant content
+    // Add chaininsight fields if relevant
     if (data && (data.calls || data.community || data.narrative)) {
       row.call_count = data.calls?.callChannelInfo?.callChannels?.length || 0;
       row.kol_calls_count = kolCallInfo?.kolCalls?.length || 0;
@@ -653,7 +406,6 @@ export class QuestDBService {
 
   async query(sql: string): Promise<QueryResult> {
     this.ensureInit();
-
     try {
       const res = await this.pgClient.query({ text: sql, rowMode: 'array' });
       return {
@@ -668,7 +420,6 @@ export class QuestDBService {
 
   async getLatest(table: string, whereClause?: string, orderBy: string = 'timestamp DESC'): Promise<TableRow | null> {
     this.ensureInit();
-
     const where = whereClause ? `WHERE ${whereClause}` : '';
     const sql = `SELECT * FROM ${table} ${where} ORDER BY ${orderBy} LIMIT 1;`;
     const res = await this.query(sql);
