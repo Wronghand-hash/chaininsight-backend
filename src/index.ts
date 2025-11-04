@@ -10,9 +10,9 @@ import kolsLeaderboardRouter from './api/router/leaderboard.route';
 import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
 import { MigrationRunner } from './db/migrations/migration-runner';
 import swaggerSpec from './config/swagger';
-import { walletService } from './services/cronServices/paymentService';
-import { solanaPaymentCheckerService } from './services/cronServices/checkSOLpayment';
-import { bscPaymentCheckerService } from './services/cronServices/checkBSCpayment';
+import { walletService } from './services/payments/paymentService';
+import { solanaPaymentCheckerService } from './services/payments/checkSOLpayment';
+import { bscPaymentCheckerService } from './services/payments/checkBSCpayment';
 dotenv.config();
 
 const app: Application = express();

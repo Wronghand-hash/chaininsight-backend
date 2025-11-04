@@ -7,10 +7,12 @@ export const config = {
   cabalSpyApiKey: process.env.CABALSPY_API_KEY || '',
 
   twitter: {
-    appKey: process.env.TWITTER_APP_KEY || 'uVn9cjGmotYMhqEPYGO1yXsZ2',
-    appSecret: process.env.TWITTER_APP_SECRET || 'nYccvop7mRBW8Glicq0NfAwzTqdbsESEBkz0JSD4sqPsZwJrui',
-    accessToken: process.env.TWITTER_ACCESS_TOKEN || '1769379822684229632-VAvlthRaw6BrruwKsn6uuYR1HGhzAT',
-    accessSecret: process.env.TWITTER_ACCESS_SECRET || 'xyOyEB1SFRR9sqHAKk6UwE0giDaoDfrglCPUtn3X6wt6n',
+    clientId: process.env.TWITTER_CLIENT_ID || 'VzM5YWNJdnZpOFRGWUhaaEFxVVo6MTpjaQ',
+    appKey: process.env.TWITTER_APP_KEY || 'id7P1AhGL3cVrGQDsz2shCspv',
+    appSecret: process.env.TWITTER_APP_SECRET || 'Yu6zwoztmMdwgnsdon5oHzWfdkvPCjUQx1iPMaYky6L8bsdOw4',
+    accessToken: process.env.TWITTER_ACCESS_TOKEN || '1769379822684229632-Wna0KjPL0b9puuzucpUYSqewULjPp5',
+    accessSecret: process.env.TWITTER_ACCESS_SECRET || '8bSXJ0sc0UsG1TBZpdRSvWrb1Huqet9o0p8yfKUAdvlNx',
+    clientSecret: process.env.TWITTER_CLIENT_SECRET || 'DzlmkH-ghlOKMfcjg13Ka_W5O0t06gFBqcIIVPvgv8SNuJS672',
   },
 
   questdb: {

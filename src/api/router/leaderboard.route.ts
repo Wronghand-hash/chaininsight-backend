@@ -5,6 +5,7 @@ import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service'; // Adjust path as needed
 import { generateTwitterLoginUrl, handleTwitterExchange, handleTwitterCallback } from '../services/twitter.auth'; // Updated import
+import generateWalletKeypair from '../controllers/payment.controller'; // Adjust path as needed for the provided controller
 const kolsLeaderboardRouter = Router();
 /**
  * @swagger
@@ -261,6 +262,80 @@ kolsLeaderboardRouter.post('/auth/twitter/exchange', handleTwitterExchange);
  *         description: Redirect to dashboard on success, or login with error
  */
 kolsLeaderboardRouter.get('/auth/twitter/callback', handleTwitterCallback);
+/**
+ * @swagger
+ * /kol/payment/init:
+ *   post:
+ *     summary: Generate wallet keypair and await synchronous payment confirmation
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [chain, twitterId, amount]
+ *             properties:
+ *               chain:
+ *                 type: string
+ *                 enum: [BSC, SOL]
+ *                 description: The blockchain network for the wallet (BSC or SOL)
+ *               twitterId:
+ *                 type: string
+ *                 description: Twitter user ID for associating the wallet
+ *               amount:
+ *                 type: number
+ *                 minimum: 0
+ *                 description: Payment amount (positive number)
+ *               serviceType:
+ *                 type: string
+ *                 description: Optional service type (defaults to 'x_alerts_service')
+ *     responses:
+ *       200:
+ *         description: Wallet generated and payment status streamed (pending -> completed/timeout)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array  # Chunked response as array of JSON objects
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   message:
+ *                     type: string
+ *                     description: Status message (e.g., "Wallet generated...", "Payment confirmed!")
+ *                   data:
+ *                     type: object
+ *                     properties:
+ *                       chain: { type: string, enum: [BSC, SOL] }
+ *                       twitterId: { type: string }
+ *                       amount: { type: number }
+ *                       serviceType: { type: string }
+ *                       address: { type: string }
+ *                       publicKey: { type: string }
+ *                       status: { type: string, enum: [pending, completed, timeout] }
+ *       400:
+ *         description: Invalid input (e.g., missing params, invalid chain, non-positive amount)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error: { type: string }
+ *       500:
+ *         description: Internal server error (e.g., wallet generation failed)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error: { type: string }
+ *       headers:
+ *         Transfer-Encoding:
+ *           schema:
+ *             type: string
+ *             description: chunked (for streaming updates)
+ */
+kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
 // components:

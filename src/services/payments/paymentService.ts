@@ -20,7 +20,6 @@ export class WalletService {
         privateKey: string;
         address: string;
     }> {
-
         let publicKey: string;
         let privateKey: string;
         let address: string;
@@ -54,7 +53,6 @@ export class WalletService {
             status: 'pending'
         };
 
-
         // Insert into DB tables
         try {
             await questdbService.insertBatch('payment_history', [paymentHistoryRow]);
@@ -64,7 +62,7 @@ export class WalletService {
             // Continue logging but don't throw if DB fails (non-critical for generation)
         }
 
-        // Log the details
+        // Log the details (masked private key)
         logger.info('🔑 New Wallet Generated', {
             chain,
             twitterId,
@@ -74,17 +72,6 @@ export class WalletService {
             publicKey,
             privateKey: privateKey.substring(0, 10) + '...',
         });
-
-        console.log(`
-🚀 User's Wallet Choice Summary:
-- Chain: ${chain}
-- Twitter ID: ${twitterId}
-- Amount: ${amount}
-- Service Type: ${serviceType}
-- Address: ${address}
-- Public Key: ${publicKey}
-- Private Key: ${privateKey} (Keep this secure!)
-    `);
 
         // Return the full details (private key included for programmatic use, but handle securely)
         return {

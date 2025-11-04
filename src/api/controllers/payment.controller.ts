@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
-import { walletService } from '../../services/cronServices/paymentService';
+import { walletService } from '../../services/payments/paymentService';  // Adjust path as needed
+import { synchronousPaymentChecker } from '../../services/payments/paymentChecker';  // New import
 import { logger } from '../../utils/logger';
-
 
 type Chain = 'BSC' | 'SOL';
 
@@ -30,24 +30,14 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
         return;
     }
 
+    let walletDetails;
     try {
-        const result = await walletService.generateAndLogKeyPair(
+        walletDetails = await walletService.generateAndLogKeyPair(
             chain as Chain,
             String(twitterId),
             Number(amount),
             serviceType ? String(serviceType) : 'x_alerts_service'
         );
-
-        res.status(200).json({
-            message: `Wallet keypair successfully generated and logged for chain: ${chain}`,
-            data: {
-                chain: result.chain,
-                twitterId: result.twitterId,
-                address: result.address,
-                publicKey: result.publicKey,
-            },
-        });
-
     } catch (error) {
         logger.error('Error generating wallet keypair in controller', { error, chain, twitterId });
         if (error instanceof Error && error.message.includes('Unsupported chain')) {
@@ -55,8 +45,56 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
         } else {
             res.status(500).json({ error: 'Internal Server Error during wallet generation.' });
         }
+        return;
     }
-};
 
+    // Immediately respond with wallet details (client can start transfer)
+    res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Transfer-Encoding': 'chunked'  // Allow streaming if needed, but we'll end after confirmation
+    });
+    res.write(JSON.stringify({
+        message: `Wallet generated. Transfer ${amount} to address: ${walletDetails.address}. Awaiting confirmation...`,
+        data: {
+            chain: walletDetails.chain,
+            twitterId: walletDetails.twitterId,
+            amount: walletDetails.amount,
+            serviceType: walletDetails.serviceType,
+            address: walletDetails.address,
+            publicKey: walletDetails.publicKey,
+            status: 'pending'
+        }
+    }) + '\n');
+
+    // Now synchronously await confirmation via polling
+    const confirmed = await synchronousPaymentChecker.checkAndConfirmPayment(
+        chain as Chain,
+        String(twitterId),
+        Number(amount),
+        walletDetails.serviceType,
+        walletDetails.address
+    );
+
+    if (confirmed) {
+        res.write(JSON.stringify({
+            message: `Payment confirmed! Service activated for ${walletDetails.serviceType}.`,
+            data: {
+                ...walletDetails,
+                status: 'completed'
+            }
+        }) + '\n');
+    } else {
+        res.write(JSON.stringify({
+            message: `Payment not confirmed within timeout (5min). Check cron for async updates or retry.`,
+            data: {
+                ...walletDetails,
+                status: 'timeout'
+            }
+        }) + '\n');
+    }
+
+    res.end();  // Close the response
+    logger.info(`[Controller] Request completed for ${twitterId}: ${confirmed ? 'confirmed' : 'timeout'}`);
+};
 
 export default generateWalletKeypair;
