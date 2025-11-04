@@ -10,11 +10,11 @@ const isValidChain = (chain: any): chain is Chain => {
 };
 
 const generateWalletKeypair = async (req: Request, res: Response): Promise<void> => {
-    const { chain, twitterId, amount, serviceType } = req.body;
+    const { chain, twitterId, amount, serviceType, wallet } = req.body;
 
-    if (!chain || !twitterId || amount === undefined) {
+    if (!chain || !twitterId || amount === undefined || !wallet) {
         logger.warn('Missing required parameters for wallet generation', req.body);
-        res.status(400).json({ error: 'Missing required parameters: chain, twitterId, and amount are required.' });
+        res.status(400).json({ error: 'Missing required parameters: chain, twitterId, amount, and wallet are required.' });
         return;
     }
 
@@ -36,7 +36,8 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
             chain as Chain,
             String(twitterId),
             Number(amount),
-            serviceType ? String(serviceType) : 'x_alerts_service'
+            serviceType ? String(serviceType) : 'x_alerts_service',
+            wallet
         );
     } catch (error) {
         logger.error('Error generating wallet keypair in controller', { error, chain, twitterId });

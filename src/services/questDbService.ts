@@ -153,7 +153,7 @@ export class QuestDBService {
           CTO STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
-      // Updated table: payment_history (removed DEFAULT, QuestDB does not support it)
+      // Updated table: payment_history (added wallet STRING)
       {
         name: 'payment_history',
         create: `CREATE TABLE IF NOT EXISTS payment_history (
@@ -162,6 +162,7 @@ export class QuestDBService {
           amount DOUBLE,
           serviceType STRING,
           chain SYMBOL,
+          wallet STRING,
           address SYMBOL,
           publicKey STRING,
           privateKey STRING,  -- Store securely; consider encryption in production
@@ -205,6 +206,9 @@ export class QuestDBService {
 
     // Ensure userPurchase has address column if table existed before
     await this.ensureUserPurchaseAddress();
+
+    // Ensure payment_history has wallet column if table existed before
+    await this.ensurePaymentHistoryWallet();
 
     logger.info('✅ QuestDB tables created or verified');
   }
@@ -271,6 +275,18 @@ export class QuestDBService {
     } catch (e) {
       if (config.questdb.diagnosticsVerbose) {
         logger.debug(`ℹ️ userPurchase address ensure skip`);
+      }
+    }
+  }
+
+  private async ensurePaymentHistoryWallet(): Promise<void> {
+    try {
+      // Add wallet column if missing
+      await this.pgClient.query(`ALTER TABLE payment_history ADD COLUMN IF NOT EXISTS wallet STRING;`);
+      logger.debug(`✅ payment_history wallet column ensured`);
+    } catch (e) {
+      if (config.questdb.diagnosticsVerbose) {
+        logger.debug(`ℹ️ payment_history wallet ensure skip`);
       }
     }
   }
@@ -400,6 +416,7 @@ export class QuestDBService {
           const amount = row.amount != null ? Number(row.amount) : null;
           const serviceType = String(row.serviceType || 'unknown');
           const chain = String(row.chain || 'BSC');
+          const wallet = String(row.wallet || '');
           const address = String(row.address || '');
           const publicKey = String(row.publicKey || '');
           const privateKey = String(row.privateKey || '');  // Store securely
@@ -411,9 +428,9 @@ export class QuestDBService {
           if (table === 'payment_history') {
             // INSERT for payment_history (paymentStatus set to false explicitly)
             sql = `INSERT INTO payment_history (
-              timestamp, twitterId, amount, serviceType, chain, address, publicKey, privateKey, paymentStatus, status
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`;
-            values = [ts, twitterId, amount, serviceType, chain, address, publicKey, privateKey, false, status];
+              timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`;
+            values = [ts, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status];
           } else if (table === 'userPurchase') {
             // Calculate expire_at: 1 month from created_at
             const createdAt = new Date(nowIso);

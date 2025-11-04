@@ -10,14 +10,15 @@ export class WalletService {
         chain: Chain,
         twitterId: string,
         amount: number,
-        serviceType: string = 'x_alerts_service'
+        serviceType: string = 'x_alerts_service',
+        wallet: string
     ): Promise<{
         chain: Chain;
         twitterId: string;
         amount: number;
         serviceType: string;
+        wallet: string;
         publicKey: string;
-        privateKey: string;
         address: string;
     }> {
         let publicKey: string;
@@ -46,6 +47,7 @@ export class WalletService {
             amount,
             serviceType,
             chain,
+            wallet,
             address,
             publicKey,
             privateKey,  // Store securely; consider hashing or encryption
@@ -73,14 +75,13 @@ export class WalletService {
             privateKey: privateKey.substring(0, 10) + '...',
         });
 
-        // Return the full details (private key included for programmatic use, but handle securely)
         return {
             chain,
             twitterId,
             amount,
             serviceType,
+            wallet,
             publicKey,
-            privateKey,
             address,
         };
     }

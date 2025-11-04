@@ -147,7 +147,7 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *         application/json:
  *           schema:
  *             type: object
- *             required: [chain, twitterId, amount]
+ *             required: [chain, twitterId, amount , wallet]
  *             properties:
  *               chain:
  *                 type: string
@@ -160,8 +160,9 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *                 type: number
  *                 minimum: 0
  *                 description: Payment amount
- *               serviceType:
+ *               wallet:
  *                 type: string
+ *                 description: User's wallet address
  *     responses:
  *       200:
  *         description: Wallet generated; streams updates (pending -> completed/timeout)
@@ -177,6 +178,7 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *                     chain: { type: string }
  *                     twitterId: { type: string }
  *                     amount: { type: number }
+ *                     wallet: { type: string }
  *                     serviceType: { type: string }
  *                     address: { type: string }
  *                     publicKey: { type: string }
