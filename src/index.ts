@@ -10,7 +10,9 @@ import kolsLeaderboardRouter from './api/router/leaderboard.route';
 import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
 import { MigrationRunner } from './db/migrations/migration-runner';
 import swaggerSpec from './config/swagger';
-
+import { walletService } from './services/cronServices/paymentService';
+import { solanaPaymentCheckerService } from './services/cronServices/checkSOLpayment';
+import { bscPaymentCheckerService } from './services/cronServices/checkBSCpayment';
 dotenv.config();
 
 const app: Application = express();
@@ -39,6 +41,8 @@ app.use((err: Error, req: any, res: any, next: any) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
+
+
 // Run database migrations
 const runMigrations = async () => {
   try {
@@ -59,6 +63,17 @@ const runMigrations = async () => {
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     // await tokenMetricsDexscreenerPoller.start();
+    // await solanaPaymentCheckerService.startCron();
+    bscPaymentCheckerService.startCron();
+
+
+    //test payement service
+    try {
+      // const result = walletService.generateAndLogKeyPair('BSC', 'iwan', 1);
+      // console.log(result);
+    } catch (error) {
+      logger.error('Payment service test failed:', error);
+    }
     app.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
     });
