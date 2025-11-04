@@ -5,7 +5,7 @@ import { kolTradeService } from '../services/kolsActivity.service';
 import {
     generateTwitterLoginUrl,
     handleTwitterCallback,
-    handleTwitterExchange
+    handleTwitterExchange // Added for the PKCE exchange step
 } from '../services/twitter.auth';
 
 const kolsLeaderboardRouter = Router();
