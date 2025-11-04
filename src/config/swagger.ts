@@ -18,6 +18,10 @@ const options: swaggerJsdoc.Options = {
                 url: 'http://localhost:3000/api/v1',
                 description: 'Development server',
             },
+            {
+                url: "https://tiesha-postrorse-blindfoldedly.ngrok-free.dev/api/v1",
+                description: "ngrok server"
+            }
         ],
         components: {
             schemas: {
