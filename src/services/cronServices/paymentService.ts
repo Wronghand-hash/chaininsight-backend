@@ -1,7 +1,7 @@
 import { Keypair } from '@solana/web3.js';
 import { Wallet } from 'ethers';
-import { logger } from '../utils/logger';
-import { questdbService } from './questDbService';
+import { logger } from '../../utils/logger';
+import { questdbService } from '../questDbService';
 
 type Chain = 'BSC' | 'SOL';
 
