@@ -1,8 +1,3 @@
-// New file: paymentChecker.ts
-// (A new utility service for synchronous balance checking in the controller.
-// This avoids relying on the async cron and enables immediate polling per request.
-// For BSC, use ethers to check ETH balance (assuming BNB is similar). Switch to mainnet RPC in prod.)
-
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ethers } from 'ethers';
 import { logger } from '../../utils/logger';
@@ -17,9 +12,35 @@ export class SynchronousPaymentChecker {
     private bscProvider: ethers.JsonRpcProvider;
 
     constructor() {
-        // Use Devnet for testing; switch to mainnet in production
         this.solConnection = new Connection('https://api.devnet.solana.com', 'confirmed');
-        this.bscProvider = new ethers.JsonRpcProvider('https://bsc-dataseed.binance.org/');  // BSC mainnet RPC; use testnet for dev
+        this.bscProvider = new ethers.JsonRpcProvider('https://bsc-dataseed.binance.org/');
+    }
+
+    /**
+     * Returns undefined on max retries exceeded to allow skipping the poll.
+     */
+    private async getBscBalanceWithRetry(address: string): Promise<bigint | undefined> {
+        let retryCount = 0;
+        const maxRetries = 3;
+
+        while (retryCount < maxRetries) {
+            try {
+                const balanceWei = await this.bscProvider.getBalance(address);
+                return balanceWei;
+            } catch (rpcError: any) {
+                if (rpcError.message?.includes('429') || rpcError.status === 429) {
+                    const backoffMs = Math.pow(2, retryCount) * 1000;
+                    logger.warn(`[SyncCheck] BSC Rate limit hit for ${address}; retrying in ${backoffMs}ms (attempt ${retryCount + 1})`);
+                    await new Promise(resolve => setTimeout(resolve, backoffMs));
+                    retryCount++;
+                } else {
+                    throw rpcError;
+                }
+            }
+        }
+
+        logger.error(`[SyncCheck] Max retries exceeded for BSC balance of ${address}; skipping this poll`);
+        return undefined;
     }
 
     async checkAndConfirmPayment(
@@ -44,7 +65,7 @@ export class SynchronousPaymentChecker {
 
             let currentBalance = 0;
             const pollIntervalMs = 3000;  // Poll every 3 seconds
-            const maxPollDurationMs = 3 * 60000;  // 3 minutes timeout
+            const maxPollDurationMs = 5 * 60000;  // 5 minutes timeout
             const startTime = Date.now();
 
             while (Date.now() - startTime < maxPollDurationMs) {
@@ -53,7 +74,12 @@ export class SynchronousPaymentChecker {
                     const lamports = await this.solConnection.getBalance(pubkey, 'confirmed');
                     currentBalance = lamports / LAMPORTS_PER_SOL;
                 } else if (chain === 'BSC') {
-                    const balanceWei = await this.bscProvider.getBalance(address);
+                    const balanceWei = await this.getBscBalanceWithRetry(address);
+                    if (balanceWei === undefined) {
+                        // Skip this poll iteration and wait for next
+                        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                        continue;
+                    }
                     currentBalance = parseFloat(ethers.formatEther(balanceWei));
                 }
 

@@ -64,7 +64,7 @@ const runMigrations = async () => {
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     // await tokenMetricsDexscreenerPoller.start();
     // await solanaPaymentCheckerService.startCron();
-    bscPaymentCheckerService.startCron();
+    // bscPaymentCheckerService.startCron();
 
 
     //test payement service
