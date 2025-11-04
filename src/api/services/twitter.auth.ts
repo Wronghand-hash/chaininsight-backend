@@ -14,7 +14,7 @@ export const generateTwitterLoginUrl = async (req: Request, res: Response): Prom
         const redirectUri = NGROK_REDIRECT_URI;
         logger.debug('generateTwitterLoginUrl: Final processed redirectUri:', redirectUri);
 
-        const scopes = ['users.read'];
+        const scopes = ['users.read' , 'tweet.read'];
         logger.debug('generateTwitterLoginUrl: Using scopes:', scopes);
 
         // The service generates the state and codeVerifier and stores the verifier internally
