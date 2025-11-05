@@ -12,8 +12,8 @@ export class SynchronousPaymentChecker {
     private bscProvider: ethers.JsonRpcProvider;
 
     constructor() {
-        this.solConnection = new Connection('https://api.devnet.solana.com', 'confirmed');
-        this.bscProvider = new ethers.JsonRpcProvider('https://bsc-dataseed.binance.org/');
+        this.solConnection = new Connection(config.SOLANA_RPC_URL, 'confirmed');
+        this.bscProvider = new ethers.JsonRpcProvider(config.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/');
     }
 
     /**
