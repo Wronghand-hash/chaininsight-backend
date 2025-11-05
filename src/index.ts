@@ -25,16 +25,16 @@ app.use(cors());
 app.use(express.json());
 
 // Swagger documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+app.use('/scanner/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   explorer: true,
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'ChainInsight API Documentation',
 }));
 
-app.use('/api/v1/kol', kolsLeaderboardRouter);
+app.use('/scanner/api/v1/kol', kolsLeaderboardRouter);
 
 // Health check
-app.get('/health', (req, res) => res.status(200).json({ status: 'OK', db: 'QuestDB ready', kafka: 'Connected' }));
+app.get('/scanner/health', (req, res) => res.status(200).json({ status: 'OK', db: 'QuestDB ready', kafka: 'Connected' }));
 
 // Error handler
 app.use((err: Error, req: any, res: any, next: any) => {
