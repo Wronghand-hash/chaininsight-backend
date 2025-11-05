@@ -13,6 +13,7 @@ import swaggerSpec from './config/swagger';
 import { walletService } from './services/payments/paymentService';
 import { solanaPaymentCheckerService } from './services/payments/checkSOLpayment';
 import { bscPaymentCheckerService } from './services/payments/checkBSCpayment';
+import { paymentTransferCron } from './services/crons/paymentTrasnfer.cron';
 dotenv.config();
 
 const app: Application = express();
@@ -65,6 +66,7 @@ const runMigrations = async () => {
     // await tokenMetricsDexscreenerPoller.start();
     // await solanaPaymentCheckerService.startCron();
     // bscPaymentCheckerService.startCron();
+    // paymentTransferCron.runTransferCron();
 
 
     //test payement service
