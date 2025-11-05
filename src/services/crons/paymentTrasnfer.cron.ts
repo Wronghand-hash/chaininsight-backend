@@ -3,12 +3,13 @@ import bs58 from 'bs58';
 import { questdbService } from '../questDbService';
 import { logger } from '../../utils/logger';
 import { QueryResult } from '../../models/db.types';
+import { config } from '../../utils/config';
 
-const SOLANA_RPC_URL = 'https://api.devnet.solana.com';
 const RECIPIENT_WALLET_ADDRESS = '2msCrwxzu4ba5Zi7qFy8iEJYAqCmWbCMoykRHiLC1CCf';
 const BATCH_SIZE = 20;
 const BATCH_DELAY_MS = 1000;
 const RECIPIENT_PRIVATE_KEY_B58 = process.env.RECIPIENT_PRIVATE_KEY || '';
+const SOLANA_RPC_URL = config.SOLANA_RPC_URL;
 
 let RECIPIENT_KEYPAIR: Keypair;
 try {

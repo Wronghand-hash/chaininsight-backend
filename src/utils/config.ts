@@ -2,10 +2,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const config = {
+  
   // Single key for ALL services (including CabalSpy authentication)
   apiKey: process.env.CHAININSIGHT_API_KEY || '',
   cabalSpyApiKey: process.env.CABALSPY_API_KEY || '',
-
+  
   twitter: {
     clientId: process.env.TWITTER_CLIENT_ID || 'VzM5YWNJdnZpOFRGWUhaaEFxVVo6MTpjaQ',
     appKey: process.env.TWITTER_APP_KEY || 'id7P1AhGL3cVrGQDsz2shCspv',
@@ -48,4 +49,6 @@ export const config = {
     KOL_TRADES: '/narration',
     NARRATION: '/narration',
   },
+
+  SOLANA_RPC_URL: process.env.SOLANA_RPC_URL || 'https://api.devnet.solana.com',
 };
