@@ -1,10 +1,9 @@
-// routes/kolsLeaderboardRouter.ts (updated with payment routes)
 import { Router, Request, Response, NextFunction } from 'express';
 import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
-import { kolTradeService } from '../services/kolsActivity.service'; // Adjust path as needed
-import { generateTwitterLoginUrl, handleTwitterExchange, handleTwitterCallback } from '../services/twitter.auth'; // Updated import
-import generateWalletKeypair from '../controllers/payment.controller'; // New import for payment route
+import { kolTradeService } from '../services/kolsActivity.service';
+import { generateTwitterLoginUrl } from '../services/twitter.auth';
+import generateWalletKeypair from '../controllers/payment.controller';
 
 const kolsLeaderboardRouter = Router();
 
@@ -213,110 +212,6 @@ kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
  *         description: Failed to generate
  */
 kolsLeaderboardRouter.get('/auth/twitter/init', generateTwitterLoginUrl);
-
-/**
- * @swagger
- * /kol/auth/twitter/login:
- *   get:
- *     summary: Generate Twitter OAuth2 login URL (legacy/redirect flow)
- *     tags: [Auth]
- *     parameters:
- *       - in: query
- *         name: redirectUri
- *         required: true
- *         schema:
- *           type: string
- *         description: Callback URL after Twitter auth (must match app settings)
- *     responses:
- *       200:
- *         description: Twitter login URL generated
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 url:
- *                   type: string
- *                 state:
- *                   type: string
- *       400:
- *         description: Missing redirectUri
- *       500:
- *         description: Failed to generate URL
- */
-kolsLeaderboardRouter.get('/auth/twitter/login', generateTwitterLoginUrl);
-
-/**
- * @swagger
- * /kol/auth/twitter/exchange:
- *   post:
- *     summary: Exchange authorization code for access tokens (client-side nonce flow)
- *     tags: [Auth]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [code, state, codeVerifier]
- *             properties:
- *               code:
- *                 type: string
- *                 description: Authorization code from Twitter redirect
- *               state:
- *                 type: string
- *                 description: CSRF state token from init response
- *               codeVerifier:
- *                 type: string
- *                 description: PKCE code verifier from init response
- *     responses:
- *       200:
- *         description: Tokens exchanged successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 access_token: { type: string }
- *                 refresh_token: { type: string }
- *                 username: { type: string }
- *                 # Add other token response properties as per twitterService
- *       400:
- *         description: Invalid code, state, or PKCE mismatch
- *       500:
- *         description: Token exchange failed
- */
-kolsLeaderboardRouter.post('/auth/twitter/exchange', handleTwitterExchange);
-
-/**
- * @swagger
- * /kol/auth/twitter/callback:
- *   get:
- *     summary: Handle Twitter OAuth2 callback (server-side, legacy)
- *     tags: [Auth]
- *     parameters:
- *       - in: query
- *         name: code
- *         required: true
- *         schema:
- *           type: string
- *         description: Authorization code from Twitter
- *       - in: query
- *         name: state
- *         required: true
- *         schema:
- *           type: string
- *         description: CSRF state token
- *       - in: query
- *         name: redirectUri
- *         schema:
- *           type: string
- *         description: Optional callback URI
- *     responses:
- *       302:
- *         description: Redirect to dashboard on success, or login with error
- */
-kolsLeaderboardRouter.get('/auth/twitter/callback', handleTwitterCallback);
 
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
