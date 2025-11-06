@@ -1,0 +1,1 @@
+ALTER TABLE kol_trades ALTER COLUMN txHash ADD INDEX;

@@ -108,6 +108,11 @@ export class KafkaService {
                             logger.warn('Missing transactionHash in trade data - skipping');
                             continue;
                         }
+                        // Validate txHash: skip if censored (contains *) or truncated (e.g., ends with 4 hex digits without full format)
+                        if (txHash.includes('*')) {
+                            logger.warn(`Invalid txHash format (censored/truncated): ${txHash} - skipping`);
+                            continue;
+                        }
                         // === Data Parsing and Assignment ===
                         // Use current timestamp for all new records
                         const timestampMs = Date.now();

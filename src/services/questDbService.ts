@@ -290,11 +290,11 @@ export class QuestDBService {
             const kolId = typeof row.kolId === 'string' ? parseInt(row.kolId, 10) : Number(row.kolId);
             const contract = String(row.contract || '');
             const txHash = String(row.txHash || '');
-            // Check uniqueness (app-level)
-            const checkSql = `SELECT count(*) as c FROM kol_trades WHERE kolId = $1 AND contract = $2 AND txHash = $3;`;
-            const checkRes = await this.pgClient.query(checkSql, [kolId, contract, txHash]);
+            // Check uniqueness using txHash only (app-level, with index for performance)
+            const checkSql = `SELECT count(*) as c FROM kol_trades WHERE txHash = $1;`;
+            const checkRes = await this.pgClient.query(checkSql, [txHash]);
             if (checkRes.rows[0]?.c > 0) {
-              if (config.questdb.diagnosticsVerbose) logger.debug(`Skipping duplicate kol_trade: kolId=${kolId}, contract=${contract}, txHash=${txHash}`);
+              if (config.questdb.diagnosticsVerbose) logger.debug(`Skipping duplicate kol_trade: txHash=${txHash}`);
               continue;
             }
             sql = `INSERT INTO kol_trades (
