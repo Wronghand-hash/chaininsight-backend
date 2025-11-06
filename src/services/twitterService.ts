@@ -3,6 +3,7 @@ import { TwitterApi } from 'twitter-api-v2';
 import { logger } from '../utils/logger';
 import { config } from '../utils/config';
 import { redis } from '../utils/redisHelper';
+import { questdbService } from './questDbService';
 
 const REDIS_NONCE_PREFIX = 'twitter:oauth:nonce:';
 const NONCE_EXPIRY_SECONDS = 600;
@@ -96,7 +97,7 @@ class TwitterService {
         return { url, state, codeVerifier, codeChallenge };
     }
 
-    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string }> {
+    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string; userId: string }> {
         logger.debug('handleLoginCallback: Received code length:', code.length, 'state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length, 'redirectUri:', redirectUri);
 
         // Get codeVerifier from Redis
@@ -151,17 +152,81 @@ class TwitterService {
             const { accessToken, refreshToken, expiresIn, scope } = tokenData;
             logger.debug('handleLoginCallback: Token exchange successful, expiresIn:', expiresIn, 'scope:', scope);
 
-            // Get user info
+            // Get user info with more fields
             const userClient = new TwitterApi(accessToken);
-            const { data: userData } = await userClient.v2.me({ 'user.fields': 'username' });
+            const { data: userData } = await userClient.v2.me({
+                'user.fields': 'id,username,name,profile_image_url,created_at,verified'
+            });
+
             logger.info(`Twitter login successful for user: @${userData.username}`);
+
+            // Calculate expiration timestamp
+            const expiresAt = new Date();
+            expiresAt.setSeconds(expiresAt.getSeconds() + expiresIn);
+
+            // Prepare the scope as a string
+            const scopeStr = Array.isArray(scope) ? scope.join(' ') : scope;
+
+            try {
+                // First, check if user exists
+                const existingUser = await questdbService.query(`
+                    SELECT id FROM twitter_auth WHERE id = '${userData.id}'
+                `);
+
+                if (existingUser.rows.length > 0) {
+                    // Update existing record
+                    await questdbService.query(`
+                        UPDATE twitter_auth 
+                        SET 
+                            timestamp = now(),
+                            username = '${userData.username.replace(/'/g, "''")}',
+                            access_token = '${accessToken.replace(/'/g, "''")}',
+                            refresh_token = ${refreshToken ? `'${refreshToken.replace(/'/g, "''")}'` : 'NULL'},
+                            expires_at = '${expiresAt.toISOString()}',
+                            scope = '${scopeStr.replace(/'/g, "''")}',
+                            updated_at = now()
+                        WHERE id = '${userData.id}'
+                    `);
+                } else {
+                    // Insert new record
+                    await questdbService.query(`
+                        INSERT INTO twitter_auth (
+                            timestamp,
+                            id, 
+                            username, 
+                            access_token, 
+                            refresh_token, 
+                            expires_at, 
+                            scope, 
+                            created_at, 
+                            updated_at
+                        ) VALUES (
+                            now(),
+                            '${userData.id}',
+                            '${userData.username.replace(/'/g, "''")}',
+                            '${accessToken.replace(/'/g, "''")}',
+                            ${refreshToken ? `'${refreshToken.replace(/'/g, "''")}'` : 'NULL'},
+                            '${expiresAt.toISOString()}',
+                            '${scopeStr.replace(/'/g, "''")}',
+                            now(),
+                            now()
+                        )
+                    `);
+                }
+
+                logger.debug(`Successfully stored/updated Twitter auth data for user: @${userData.username}`);
+            } catch (error) {
+                logger.error('Failed to store Twitter auth data:', error);
+                // Don't fail the login flow if DB update fails, just log the error
+            }
 
             return {
                 accessToken,
                 refreshToken,
                 expiresIn,
-                scope: Array.isArray(scope) ? scope.join(' ') : scope,
+                scope: scopeStr,
                 username: userData.username,
+                userId: userData.id
             };
         } catch (err: any) {
             logger.error(`Failed to handle Twitter login callback: ${err.code || 'Unknown error'} - ${err.message}`, err);

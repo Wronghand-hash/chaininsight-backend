@@ -75,7 +75,7 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
 
         // Redirect to client dashboard with success
-        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app/dashboard'}/dashboard?success=true&username=${result.username}`;
+        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}`;
         logger.debug('handleTwitterCallback: Redirecting to client URL:', clientUrl);
         res.redirect(clientUrl);
     } catch (error: any) {
