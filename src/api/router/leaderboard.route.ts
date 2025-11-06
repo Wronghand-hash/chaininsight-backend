@@ -2,11 +2,10 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service';
-import { generateTwitterLoginUrl } from '../services/twitter.auth';
-import generateWalletKeypair from '../controllers/payment.controller';
+import { generateTwitterLoginUrl, handleTwitterCallback } from '../services/twitter.auth';
+import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 
 const kolsLeaderboardRouter = Router();
-
 /**
  * @swagger
  * /kol/leaderboard:
@@ -39,7 +38,6 @@ const kolsLeaderboardRouter = Router();
  *         description: Internal server error
  */
 kolsLeaderboardRouter.get('/leaderboard', getKolLeaderboards);
-
 /**
  * @swagger
  * /kol/info:
@@ -68,7 +66,6 @@ kolsLeaderboardRouter.get('/leaderboard', getKolLeaderboards);
  *         description: Internal server error
  */
 kolsLeaderboardRouter.get('/info', getTokenDetails);
-
 /**
  * @swagger
  * /kol/top-tokens:
@@ -133,12 +130,11 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
         next(error);
     }
 });
-
 /**
  * @swagger
  * /kol/payment/init:
  *   post:
- *     summary: Generate wallet keypair for payment initiation and await confirmation
+ *     summary: Generate wallet keypair for payment initiation
  *     tags: [Payment]
  *     requestBody:
  *       required: true
@@ -146,7 +142,7 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *         application/json:
  *           schema:
  *             type: object
- *             required: [chain, twitterId, amount , wallet]
+ *             required: [chain, twitterId, amount, wallet]
  *             properties:
  *               chain:
  *                 type: string
@@ -162,32 +158,104 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *               wallet:
  *                 type: string
  *                 description: User's wallet address
+ *               serviceType:
+ *                 type: string
+ *                 description: Optional service type
  *     responses:
  *       200:
- *         description: Wallet generated; streams updates (pending -> completed/timeout)
+ *         description: Wallet generated successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 message: { type: string }
- *                 data:
- *                   type: object
- *                   properties:
- *                     chain: { type: string }
- *                     twitterId: { type: string }
- *                     amount: { type: number }
- *                     wallet: { type: string }
- *                     serviceType: { type: string }
- *                     address: { type: string }
- *                     publicKey: { type: string }
- *                     status: { type: string, enum: [pending, completed, timeout] }
+ *                 type:
+ *                   type: string
+ *                   enum: [wallet]
+ *                 walletAddress:
+ *                   type: string
  *       400:
  *         description: Invalid input parameters
  *       500:
  *         description: Internal server error
  */
 kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
+/**
+ * @swagger
+ * /kol/payment/status:
+ *   post:
+ *     summary: Check status of initiated payment
+ *     tags: [Payment]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [twitterId, chain]
+ *             properties:
+ *               twitterId:
+ *                 type: string
+ *                 description: User's Twitter ID
+ *               chain:
+ *                 type: string
+ *                 enum: [BSC, SOL]
+ *                 description: Blockchain chain
+ *     responses:
+ *       200:
+ *         description: Payment status retrieved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 type:
+ *                   type: string
+ *                   enum: [status]
+ *                 status:
+ *                   type: string
+ *                   enum: [COMPLETED, PENDING]
+ *                 transactionId:
+ *                   type: string
+ *       400:
+ *         description: Invalid input parameters
+ *       404:
+ *         description: No payment found
+ *       500:
+ *         description: Internal server error
+ */
+kolsLeaderboardRouter.post('/payment/status', getPaymentStatus);
+
+
+/**
+ * @swagger
+ * /kol/auth/twitter/callback:
+ *   get:
+ *     summary: Handle Twitter OAuth2 callback (server-side, legacy)
+ *     tags: [Auth]
+ *     parameters:
+ *       - in: query
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Authorization code from Twitter
+ *       - in: query
+ *         name: state
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: CSRF state token
+ *       - in: query
+ *         name: redirectUri
+ *         schema:
+ *           type: string
+ *         description: Optional callback URI
+ *     responses:
+ *       302:
+ *         description: Redirect to dashboard on success, or login with error
+ */
+kolsLeaderboardRouter.get('/auth/twitter/callback', handleTwitterCallback);
 
 /**
  * @swagger
@@ -212,7 +280,6 @@ kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
  *         description: Failed to generate
  */
 kolsLeaderboardRouter.get('/auth/twitter/init', generateTwitterLoginUrl);
-
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
 // components:
@@ -250,5 +317,4 @@ kolsLeaderboardRouter.get('/auth/twitter/init', generateTwitterLoginUrl);
 //           type: string
 //         tradeCount:
 //           type: integer
-
 export default kolsLeaderboardRouter;

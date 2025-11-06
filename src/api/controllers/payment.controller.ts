@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import { walletService } from '../../services/payments/paymentService';  // Adjust path as needed
-import { synchronousPaymentChecker } from '../../services/payments/paymentChecker';  // New import
+import { walletService } from '../../services/payments/paymentService';
 import { logger } from '../../utils/logger';
+import { questdbService } from '../../services/questDbService';
+import { paymentChecker } from '../../services/payments/paymentChecker';
 
 type Chain = 'BSC' | 'SOL';
 
@@ -49,45 +50,89 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
         return;
     }
 
-    // Immediately respond with wallet details (client can start transfer)
-    res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Transfer-Encoding': 'chunked'
+    // Immediately respond with wallet details (no streaming or waiting)
+    res.status(200).json({
+        type: 'wallet',
+        walletAddress: walletDetails.address,
     });
 
-    // 💡 FIX 1: Format the initial response as a 'wallet' type object
-    res.write(JSON.stringify({
-        type: 'wallet', // <-- MATCHES client's 'data.type' check
-        walletAddress: walletDetails.address, // <-- Client expects this
-    }) + '\n'); // <-- Newline separator is essential for streaming
-
-    // Now synchronously await confirmation via polling
-    const confirmed = await synchronousPaymentChecker.checkAndConfirmPayment(
-        chain as Chain,
-        String(twitterId),
-        Number(amount),
-        walletDetails.serviceType,
-        walletDetails.address
-    );
-
-    // 💡 FIX 2: Format status updates as 'status' type objects
-    if (confirmed) {
-        res.write(JSON.stringify({
-            type: 'status', // <-- MATCHES client's 'data.type' check
-            status: 'COMPLETED', // <-- Client expects this status
-            // Note: You must link the transaction ID here
-            transactionId: `TX_${chain}_${Date.now()}`, // Placeholder for real transaction ID
-        }) + '\n');
-    } else {
-        res.write(JSON.stringify({
-            type: 'status', // <-- MATCHES client's 'data.type' check
-            status: 'FAILED', // Using FAILED instead of a custom 'timeout' for clarity
-            transactionId: 'N/A',
-        }) + '\n');
-    }
-
-    res.end();  // Close the response
-    logger.info(`[Controller] Request completed for ${twitterId}: ${confirmed ? 'confirmed' : 'timeout'}`);
+    logger.info(`[Controller] Wallet generated for ${twitterId}: ${walletDetails.address}`);
 };
 
-export default generateWalletKeypair;
+const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
+    const { twitterId, chain } = req.body;  // Or use req.query if preferred
+
+    if (!twitterId || !chain) {
+        logger.warn('Missing required parameters for status check', req.body);
+        res.status(400).json({ error: 'Missing required parameters: twitterId and chain are required.' });
+        return;
+    }
+
+    if (!isValidChain(chain)) {
+        logger.warn(`Invalid chain provided for status: ${chain}`);
+        res.status(400).json({ error: `Unsupported chain: ${chain}. Supported chains are BSC and SOL.` });
+        return;
+    }
+
+    try {
+        // Query for the latest payment entry for this twitterId and chain
+        const escTwitterId = String(twitterId).replace(/'/g, "''");
+        const statusSql = `
+            SELECT amount, serviceType, address, paymentStatus, status 
+            FROM payment_history 
+            WHERE twitterId = '${escTwitterId}' AND chain = '${chain}' 
+            ORDER BY timestamp DESC LIMIT 1;
+        `;
+        const statusRes = await questdbService.query(statusSql);  // Now imported
+
+        if (statusRes.rows.length === 0) {
+            res.status(404).json({ error: 'No payment found for the given twitterId and chain.' });
+            return;
+        }
+
+        const [amount, serviceType, address, paymentStatus, dbStatus] = statusRes.rows[0];
+
+        if (dbStatus === 'completed') {
+            // Already completed
+            res.status(200).json({
+                type: 'status',
+                status: 'COMPLETED',
+                address: address,
+                transactionId: `TX_${chain}_${Date.now()}`,  // Placeholder; enhance to fetch real TX if needed
+            });
+            return;
+        }
+
+        // If pending, perform a single check
+        const confirmed = await paymentChecker.checkPaymentOnce(
+            chain as Chain,
+            String(twitterId),
+            Number(amount),
+            String(serviceType),
+            String(address)
+        );
+
+        if (confirmed) {
+            res.status(200).json({
+                type: 'status',
+                status: 'COMPLETED',
+                address: address,
+                transactionId: `TX_${chain}_${Date.now()}`,  // Placeholder
+            });
+        } else {
+            res.status(200).json({
+                type: 'status',
+                status: 'PENDING',
+                address: address,
+                transactionId: 'N/A',
+            });
+        }
+
+        logger.info(`[Controller] Status checked for ${twitterId} (${chain}): ${confirmed ? 'confirmed' : 'pending'}`);
+    } catch (error) {
+        logger.error('Error checking payment status', { error, twitterId, chain });
+        res.status(500).json({ error: 'Internal Server Error during status check.' });
+    }
+};
+
+export { generateWalletKeypair, getPaymentStatus };  // Named exports for router import

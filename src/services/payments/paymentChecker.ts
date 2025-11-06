@@ -7,7 +7,7 @@ import type { QueryResult } from '../../models/db.types';
 
 type Chain = 'BSC' | 'SOL';
 
-export class SynchronousPaymentChecker {
+export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
     private solConnection: Connection;
     private bscProvider: ethers.JsonRpcProvider;
 
@@ -17,7 +17,7 @@ export class SynchronousPaymentChecker {
     }
 
     /**
-     * Returns undefined on max retries exceeded to allow skipping the poll.
+     * Returns undefined on max retries exceeded to allow skipping the check.
      */
     private async getBscBalanceWithRetry(address: string): Promise<bigint | undefined> {
         let retryCount = 0;
@@ -30,7 +30,7 @@ export class SynchronousPaymentChecker {
             } catch (rpcError: any) {
                 if (rpcError.message?.includes('429') || rpcError.status === 429) {
                     const backoffMs = Math.pow(2, retryCount) * 1000;
-                    logger.warn(`[SyncCheck] BSC Rate limit hit for ${address}; retrying in ${backoffMs}ms (attempt ${retryCount + 1})`);
+                    logger.warn(`[Check] BSC Rate limit hit for ${address}; retrying in ${backoffMs}ms (attempt ${retryCount + 1})`);
                     await new Promise(resolve => setTimeout(resolve, backoffMs));
                     retryCount++;
                 } else {
@@ -39,11 +39,15 @@ export class SynchronousPaymentChecker {
             }
         }
 
-        logger.error(`[SyncCheck] Max retries exceeded for BSC balance of ${address}; skipping this poll`);
+        logger.error(`[Check] Max retries exceeded for BSC balance of ${address}; skipping this check`);
         return undefined;
     }
 
-    async checkAndConfirmPayment(
+    /**
+     * Performs a single check for payment confirmation (no polling loop).
+     * Returns true if confirmed (and updates DB), false otherwise.
+     */
+    async checkPaymentOnce(
         chain: Chain,
         twitterId: string,
         amount: number,
@@ -51,67 +55,58 @@ export class SynchronousPaymentChecker {
         address: string
     ): Promise<boolean> {
         try {
-            // First, check if already confirmed in DB (in case cron ran)
+            // First, check if already confirmed in DB (quick exit)
             const checkStatusSql = `
                 SELECT paymentStatus FROM payment_history 
                 WHERE twitterId = '${twitterId.replace(/'/g, "''")}' AND address = '${address.replace(/'/g, "''")}' AND chain = '${chain}';
             `;
             const statusRes: QueryResult = await questdbService.query(checkStatusSql);
             if (statusRes.rows.length > 0 && statusRes.rows[0][0] === true) {
-                logger.info(`[SyncCheck] Payment already confirmed in DB for ${twitterId} (${address})`);
+                logger.info(`[Check] Payment already confirmed in DB for ${twitterId} (${address})`);
                 await this.handlePurchaseCreation(twitterId, amount, serviceType, address);
                 return true;
             }
 
             let currentBalance = 0;
-            const pollIntervalMs = 3000;  // Poll every 3 seconds
-            const maxPollDurationMs = 5 * 60000;  // 5 minutes timeout
-            const startTime = Date.now();
 
-            while (Date.now() - startTime < maxPollDurationMs) {
-                if (chain === 'SOL') {
-                    const pubkey = new PublicKey(address);
-                    const lamports = await this.solConnection.getBalance(pubkey, 'confirmed');
-                    currentBalance = lamports / LAMPORTS_PER_SOL;
-                } else if (chain === 'BSC') {
-                    const balanceWei = await this.getBscBalanceWithRetry(address);
-                    if (balanceWei === undefined) {
-                        // Skip this poll iteration and wait for next
-                        await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-                        continue;
-                    }
-                    currentBalance = parseFloat(ethers.formatEther(balanceWei));
+            if (chain === 'SOL') {
+                const pubkey = new PublicKey(address);
+                const lamports = await this.solConnection.getBalance(pubkey, 'confirmed');
+                currentBalance = lamports / LAMPORTS_PER_SOL;
+            } else if (chain === 'BSC') {
+                const balanceWei = await this.getBscBalanceWithRetry(address);
+                if (balanceWei === undefined) {
+                    logger.warn(`[Check] Skipping balance check for ${address} due to retries exceeded`);
+                    return false;  // Treat as not confirmed for this check
                 }
-
-                logger.debug(`[SyncCheck] ${twitterId} (${address}): current=${currentBalance}, required=${amount}`);
-
-                if (currentBalance >= amount) {
-                    // Update DB
-                    const escTwitterId = twitterId.replace(/'/g, "''");
-                    const escAddress = address.replace(/'/g, "''");
-                    const updatePaymentSql = `
-                        UPDATE payment_history 
-                        SET paymentStatus = true, status = 'completed' 
-                        WHERE twitterId = '${escTwitterId}' AND address = '${escAddress}';
-                    `;
-                    const updateRes = await questdbService.query(updatePaymentSql);
-                    if (updateRes.rows.length > 0) {  // Adjust based on QuestDB response
-                        logger.info(`✅ Synchronous payment confirmed for ${twitterId} (${address}): updated DB`);
-                    }
-
-                    // Handle purchase creation
-                    await this.handlePurchaseCreation(twitterId, amount, serviceType, address);
-                    return true;
-                }
-
-                // Wait before next poll
-                await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+                currentBalance = parseFloat(ethers.formatEther(balanceWei));
             }
 
-            logger.warn(`[SyncCheck] Timeout: Payment not confirmed within 5min for ${twitterId} (${address})`);
+            logger.debug(`[Check] ${twitterId} (${address}): current=${currentBalance}, required=${amount}`);
+
+            if (currentBalance >= amount) {
+                // Update DB
+                const escTwitterId = twitterId.replace(/'/g, "''");
+                const escAddress = address.replace(/'/g, "''");
+                const updatePaymentSql = `
+                    UPDATE payment_history 
+                    SET paymentStatus = true, status = 'completed' 
+                    WHERE twitterId = '${escTwitterId}' AND address = '${escAddress}';
+                `;
+                const updateRes = await questdbService.query(updatePaymentSql);
+                if (updateRes.rows.length > 0) {  // Adjust based on QuestDB response
+                    logger.info(`✅ Payment confirmed for ${twitterId} (${address}): updated DB`);
+                }
+
+                // Handle purchase creation
+                await this.handlePurchaseCreation(twitterId, amount, serviceType, address);
+                return true;
+            }
+
+            logger.debug(`[Check] Payment not yet confirmed for ${twitterId} (${address})`);
             return false;
         } catch (error) {
-            logger.error(`[SyncCheck] Error checking payment for ${twitterId} (${address})`, error);
+            logger.error(`[Check] Error checking payment for ${twitterId} (${address})`, error);
             return false;
         }
     }
@@ -148,9 +143,9 @@ export class SynchronousPaymentChecker {
             await questdbService.insertBatch('userPurchase', [purchaseRow]);
             logger.info(`💾 Added userPurchase for ${twitterId} (${serviceType}) with address ${address}`);
         } else {
-            logger.debug(`[SyncCheck] userPurchase already exists for ${twitterId} (${serviceType}) + address ${address}`);
+            logger.debug(`[Check] userPurchase already exists for ${twitterId} (${serviceType}) + address ${address}`);
         }
     }
 }
 
-export const synchronousPaymentChecker = new SynchronousPaymentChecker();
+export const paymentChecker = new PaymentChecker();  // Renamed export

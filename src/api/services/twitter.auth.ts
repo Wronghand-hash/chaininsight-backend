@@ -54,7 +54,7 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
 
         if (!code || typeof code !== 'string' || !state || typeof state !== 'string') {
             logger.warn('handleTwitterCallback: Missing or invalid params, redirecting with error');
-            res.redirect(`${process.env.CLIENT_URL || 'http://127.0.0.1:3000'}/login?error=missing_params`);
+            res.redirect(`${process.env.CLIENT_URL || 'https://xalerts.vercel.app/'}/login?error=missing_params`);
             return;
         }
 
@@ -64,7 +64,7 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         if (!codeVerifier) {
             // This indicates the stored nonce (PKCE secret) was not found (session expired, etc.)
             logger.error('handleTwitterCallback: CodeVerifier not found for state:', state);
-            res.redirect(`${process.env.CLIENT_URL || 'http://127.0.0.1:3000'}/login?error=session_expired_or_pkce_missing`);
+            res.redirect(`${process.env.CLIENT_URL || 'https://xalerts.vercel.app/'}/login?error=session_expired_or_pkce_missing`);
             return;
         }
 
