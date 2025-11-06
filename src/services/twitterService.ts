@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { config } from '../utils/config';
 import { redis } from '../utils/redisHelper';
 import { questdbService } from './questDbService';
+import type { TwitterAuthRow } from '../models/db.types';
 
 const REDIS_NONCE_PREFIX = 'twitter:oauth:nonce:';
 const NONCE_EXPIRY_SECONDS = 600;
@@ -178,7 +179,6 @@ class TwitterService {
                     await questdbService.query(`
                         UPDATE twitter_auth 
                         SET 
-                            timestamp = now(),
                             username = '${userData.username.replace(/'/g, "''")}',
                             access_token = '${accessToken.replace(/'/g, "''")}',
                             refresh_token = ${refreshToken ? `'${refreshToken.replace(/'/g, "''")}'` : 'NULL'},
@@ -233,6 +233,112 @@ class TwitterService {
             throw err;
         }
     }
+    public async logout(userId: string): Promise<boolean> {
+        const clientId = config.twitter?.clientId;
+        const clientSecret = config.twitter?.clientSecret;
+
+        if (!clientId || !clientSecret) {
+            logger.error('Twitter OAuth client credentials not configured');
+            return false;
+        }
+
+        try {
+            // 1. Fetch tokens from database
+            const query = `SELECT * FROM twitter_auth WHERE id = '${userId}'`;
+            logger.debug(`Fetching tokens for user ${userId}`);
+            const result = await questdbService.query(query);
+
+            if (result.rows.length === 0) {
+                logger.info(`No Twitter auth found for user ${userId}`);
+                return true; // No record to delete, consider it a success
+            }
+
+            const row = result.rows[0];
+            const access_token = row[3];
+            const refresh_token = row[4];
+            const expires_at = row[5];
+            const isTokenExpired = new Date(expires_at) < new Date();
+
+            // 2. Revoke tokens if they exist and aren't expired
+            if (access_token && refresh_token && !isTokenExpired) {
+                const auth = 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+                const revokeUrl = 'https://api.twitter.com/2/oauth2/revoke';
+
+                // Revoke access token
+                const accessTokenParams = new URLSearchParams();
+                accessTokenParams.append('token', access_token);
+                accessTokenParams.append('token_type_hint', 'access_token');
+
+                await fetch(revokeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Authorization': auth
+                    },
+                    body: accessTokenParams.toString()
+                });
+
+                // Revoke refresh token
+                const refreshTokenParams = new URLSearchParams();
+                refreshTokenParams.append('token', refresh_token);
+                refreshTokenParams.append('token_type_hint', 'refresh_token');
+
+                await fetch(revokeUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Authorization': auth
+                    },
+                    body: refreshTokenParams.toString()
+                });
+
+                logger.debug(`Revoked Twitter tokens for user ${userId}`);
+            } else if (isTokenExpired) {
+                logger.debug(`Skipping token revocation for user ${userId} - tokens are already expired`);
+            }
+
+            // 3. Always attempt to delete the record
+            // QuestDB 6.0+ supports DELETE with WHERE clause
+            const updateQuery = `
+                    UPDATE twitter_auth 
+                    SET 
+                        access_token = NULL, 
+                        refresh_token = NULL, 
+                        expires_at = '1970-01-01T00:00:00Z'::TIMESTAMP,
+                        scope = NULL
+                    WHERE id = '${userId}';
+                    `;
+            await questdbService.query(updateQuery);
+            logger.info(`Successfully logged out and removed Twitter auth for user ${userId}`);
+
+            return true;
+        } catch (error) {
+            logger.error(`Error during Twitter logout for user ${userId}:`, error);
+
+            // Even if there was an error, try to clean up the database record
+            try {
+                // QuestDB 6.0+ supports DELETE with WHERE clause
+                const updateQuery = `
+  UPDATE twitter_auth 
+  SET 
+    access_token = NULL, 
+    refresh_token = NULL, 
+    expires_at = '1970-01-01T00:00:00Z'::TIMESTAMP,
+    scope = NULL
+    WHERE id = '${userId}';
+`;
+                await questdbService.query(updateQuery);
+                logger.info(`Cleaned up Twitter auth record for user ${userId} after error`);
+            } catch (dbError) {
+                logger.error(`Failed to clean up Twitter auth record for user ${userId}:`, dbError);
+            }
+
+            return false;
+        }
+    }
 }
+
+
+
 
 export const twitterService = new TwitterService();

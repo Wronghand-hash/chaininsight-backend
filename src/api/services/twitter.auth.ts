@@ -75,11 +75,41 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
 
         // Redirect to client dashboard with success
-        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}`;
+        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}&userId=${result.userId}`;
         logger.debug('handleTwitterCallback: Redirecting to client URL:', clientUrl);
         res.redirect(clientUrl);
     } catch (error: any) {
         logger.error('handleTwitterCallback: Error handling Twitter callback:', error);
         res.redirect(`${process.env.CLIENT_URL || 'https://xalerts.vercel.app/dashboard'}/login?error=auth_failed`);
+    }
+};
+
+/**
+ * Handles Twitter OAuth logout
+ * Revokes the user's Twitter tokens and clears the session
+ */
+export const handleTwitterLogout = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { userId } = req.body;
+
+        if (!userId) {
+            logger.warn('handleTwitterLogout: Missing userId in request');
+            res.status(400).json({ error: 'User ID is required' });
+            return;
+        }
+
+        logger.debug(`handleTwitterLogout: Attempting to log out user ${userId}`);
+        const success = await twitterService.logout(userId);
+
+        if (success) {
+            logger.info(`handleTwitterLogout: Successfully logged out user ${userId}`);
+            res.status(200).json({ success: true, message: 'Successfully logged out' });
+        } else {
+            logger.warn(`handleTwitterLogout: Failed to log out user ${userId}`);
+            res.status(500).json({ error: 'Failed to log out' });
+        }
+    } catch (error: any) {
+        logger.error('handleTwitterLogout: Error during logout:', error);
+        res.status(500).json({ error: 'An error occurred during logout' });
     }
 };

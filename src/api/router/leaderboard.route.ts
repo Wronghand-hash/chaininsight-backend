@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { getKolLeaderboards } from '../controllers/leaderboard.controller';
 import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service';
-import { generateTwitterLoginUrl, handleTwitterCallback } from '../services/twitter.auth';
+import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 
 const kolsLeaderboardRouter = Router();
@@ -256,6 +256,43 @@ kolsLeaderboardRouter.post('/payment/status', getPaymentStatus);
  *         description: Redirect to dashboard on success, or login with error
  */
 kolsLeaderboardRouter.get('/auth/twitter/callback', handleTwitterCallback);
+
+/**
+ * @swagger
+ * /kol/auth/twitter/logout:
+ *   post:
+ *     summary: Logout from Twitter OAuth
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *             properties:
+ *               userId:
+ *                 type: string
+ *                 description: The user's ID to log out
+ *     responses:
+ *       200:
+ *         description: Successfully logged out
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Missing or invalid parameters
+ *       500:
+ *         description: Error during logout
+ */
+kolsLeaderboardRouter.post('/auth/twitter/logout', handleTwitterLogout);
 
 /**
  * @swagger

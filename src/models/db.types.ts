@@ -10,3 +10,4 @@ export type PriceRow = [Date, string, number, number, string];  // timestamp, co
 export type KolTradeRow = [Date, number, string, string, number, string];  // timestamp, kolId, contract, action, amount, chain
 export type TokenInfoRow = [Date, string, string, string];  // timestamp, contract, data (JSON str), chain
 export type SecurityRow = [Date, string, string, string];  // timestamp, address, data (JSON str), chain
+export type TwitterAuthRow = [Date, string, string, string, string, Date, string, Date, Date];  // timestamp, id, username, access_token, refresh_token, expires_at, scope, created_at, updated_at
