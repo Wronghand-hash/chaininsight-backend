@@ -21,6 +21,10 @@ const options: swaggerJsdoc.Options = {
             {
                 url: "https://tiesha-postrorse-blindfoldedly.ngrok-free.dev/api/v1",
                 description: "ngrok server"
+            },
+            {
+                url: "https://api.hypeignite.io/scanner/api/v1",
+                description: "production server"
             }
         ],
         components: {

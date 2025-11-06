@@ -4,7 +4,7 @@ import { twitterService } from '../../services/twitterService'; // Adjust path a
 import { logger } from '../../utils/logger'; // Assuming logger is available; adjust path if needed
 
 // CRITICAL: Define the required, registered HTTPS ngrok URI once for consistency
-const NGROK_REDIRECT_URI = 'https://tiesha-postrorse-blindfoldedly.ngrok-free.dev/api/v1/kol/auth/twitter/callback';
+const NGROK_REDIRECT_URI = 'https://api.hypeignite.io/scanner/api/v1/kol/auth/twitter/callback';
 
 // 1. Get nonce/auth URL (init for nonce flow)
 export const generateTwitterLoginUrl = async (req: Request, res: Response): Promise<void> => {
@@ -75,11 +75,11 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
 
         // Redirect to client dashboard with success
-        const clientUrl = `${process.env.CLIENT_URL || 'http://127.0.0.1:3000'}/dashboard?success=true&username=${result.username}`;
+        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app/dashboard'}/dashboard?success=true&username=${result.username}`;
         logger.debug('handleTwitterCallback: Redirecting to client URL:', clientUrl);
         res.redirect(clientUrl);
     } catch (error: any) {
         logger.error('handleTwitterCallback: Error handling Twitter callback:', error);
-        res.redirect(`${process.env.CLIENT_URL || 'http://127.0.0.1:3000'}/login?error=auth_failed`);
+        res.redirect(`${process.env.CLIENT_URL || 'https://xalerts.vercel.app/dashboard'}/login?error=auth_failed`);
     }
 };
