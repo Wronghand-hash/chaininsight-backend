@@ -52,20 +52,14 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
     // Immediately respond with wallet details (client can start transfer)
     res.writeHead(200, {
         'Content-Type': 'application/json',
-        'Transfer-Encoding': 'chunked'  // Allow streaming if needed, but we'll end after confirmation
+        'Transfer-Encoding': 'chunked'
     });
+
+    // 💡 FIX 1: Format the initial response as a 'wallet' type object
     res.write(JSON.stringify({
-        message: `Wallet generated. Transfer ${amount} to address: ${walletDetails.address}. Awaiting confirmation...`,
-        data: {
-            chain: walletDetails.chain,
-            twitterId: walletDetails.twitterId,
-            amount: walletDetails.amount,
-            serviceType: walletDetails.serviceType,
-            address: walletDetails.address,
-            publicKey: walletDetails.publicKey,
-            status: 'pending'
-        }
-    }) + '\n');
+        type: 'wallet', // <-- MATCHES client's 'data.type' check
+        walletAddress: walletDetails.address, // <-- Client expects this
+    }) + '\n'); // <-- Newline separator is essential for streaming
 
     // Now synchronously await confirmation via polling
     const confirmed = await synchronousPaymentChecker.checkAndConfirmPayment(
@@ -76,21 +70,19 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
         walletDetails.address
     );
 
+    // 💡 FIX 2: Format status updates as 'status' type objects
     if (confirmed) {
         res.write(JSON.stringify({
-            message: `Payment confirmed! Service activated for ${walletDetails.serviceType}.`,
-            data: {
-                ...walletDetails,
-                status: 'completed'
-            }
+            type: 'status', // <-- MATCHES client's 'data.type' check
+            status: 'COMPLETED', // <-- Client expects this status
+            // Note: You must link the transaction ID here
+            transactionId: `TX_${chain}_${Date.now()}`, // Placeholder for real transaction ID
         }) + '\n');
     } else {
         res.write(JSON.stringify({
-            message: `Payment not confirmed within timeout (5min). Check cron for async updates or retry.`,
-            data: {
-                ...walletDetails,
-                status: 'timeout'
-            }
+            type: 'status', // <-- MATCHES client's 'data.type' check
+            status: 'FAILED', // Using FAILED instead of a custom 'timeout' for clarity
+            transactionId: 'N/A',
         }) + '\n');
     }
 
