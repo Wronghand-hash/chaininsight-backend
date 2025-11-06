@@ -4,19 +4,27 @@ import { logger } from '../utils/logger';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const kafkaBrokerUrl = process.env.KAFKA_BROKER_URL;
+const kafkaBrokerUrl = process.env.KAFKA_BROKER_URL || '43.159.57.127:19999'; // Updated to match Python example
+const kafkaUsername = process.env.KAFKA_USERNAME || 'cherrybot'; // TODO: Replace with your username
+const kafkaPassword = process.env.KAFKA_PASSWORD || 'ci_cb_Gz7FwY09pspEe7SxTc0cWyEHKhAXj3Fj'; // TODO: Replace with your password
+const kafkaGroupId = process.env.KAFKA_GROUP_ID || 'cherrybot_group'; // TODO: Replace with your consumer group ID, e.g., "ChainInsight-Dev"
 
 const kafka = new Kafka({
     clientId: 'chaininsight-consumer',
-    brokers: [kafkaBrokerUrl!]
+    brokers: [kafkaBrokerUrl],
+    ssl: false, // SASL_PLAINTEXT
+    sasl: {
+        mechanism: 'scram-sha-256',
+        username: kafkaUsername,
+        password: kafkaPassword,
+    },
 });
 
-const consumer: Consumer = kafka.consumer({
-    groupId: process.env.KAFKA_GROUP_ID || 'Greez'
-});
+const consumer: Consumer = kafka.consumer({ groupId: kafkaGroupId });
 
 const processedTxCache: Map<string, number> = new Map();
 const DUP_TTL_MS = 5 * 60 * 1000;
+
 const pruneProcessedTxCache = () => {
     const now = Date.now();
     for (const [tx, ts] of processedTxCache) {
@@ -48,7 +56,6 @@ const ACTION_TYPE_MAP: { [key: string]: string } = {
  */
 const parseNumericValue = (str: string | undefined): number => {
     if (!str || typeof str !== 'string') return Date.now();
-
     // Handle price strings like "0.0₄5643" (0.00005643) by replacing the subscript number
     const scientificMatch = str.match(/0\.0(\d+)([a-zA-Z\d\.]+)/);
     if (scientificMatch) {
@@ -56,14 +63,11 @@ const parseNumericValue = (str: string | undefined): number => {
         const value = parseFloat(`0.${'0'.repeat(zeros)}${scientificMatch[2]}`);
         if (!isNaN(value)) return value * 1000; // But this is for price, not timestamp; adjust if needed
     }
-
     // Handle K/M suffixes (unlikely for timestamps, but kept for compatibility)
     let numStr = str.replace(/[^eE\d.]/g, ''); // Clean non-numeric, non-dot, non-E/e characters
     let num = parseFloat(numStr);
-
     if (str.toUpperCase().includes('M')) num *= 1e6;
     else if (str.toUpperCase().includes('K')) num *= 1e3;
-
     const parsed = isNaN(num) ? Date.now() : num;
     // Detect if input looks like seconds (small number < 1e10) vs ms (>1e10), but assume ms as per fallback
     return parsed < 1e10 ? parsed * 1000 : parsed; // Heuristic: if <10 digits, treat as seconds and convert to ms
@@ -72,8 +76,11 @@ const parseNumericValue = (str: string | undefined): number => {
 export class KafkaService {
     async connect() {
         await consumer.connect();
-        await consumer.subscribe({ topic: 'prod-tob-kol-transaction-update', fromBeginning: false });
-        logger.info('Kafka consumer connected to ChainInsight (43.134.238.235:32777)');
+        await consumer.subscribe({
+            topic: 'prod-tob-kol-transaction-update',
+            fromBeginning: true // Updated to 'earliest' equivalent
+        });
+        logger.info(`Kafka consumer connected to ChainInsight (${kafkaBrokerUrl})`);
     }
 
     async consume() {
@@ -86,7 +93,6 @@ export class KafkaService {
                         logger.warn('Empty Kafka message - skipping');
                         return;
                     }
-
                     let tradeData;
                     try {
                         tradeData = JSON.parse(rawValue);
@@ -94,72 +100,52 @@ export class KafkaService {
                         logger.warn(`Invalid JSON in Kafka message (offset ${message.offset}): ${rawValue.slice(0, 100)}... - skipping`);
                         return;
                     }
-
                     // Process each item in data array (batches)
                     for (const trade of tradeData.data || []) {
-
                         const txHash = String(trade.transactionHash || '');
-
                         // Check for required field: Transaction Hash is critical for deduplication
                         if (!txHash) {
                             logger.warn('Missing transactionHash in trade data - skipping');
                             continue;
                         }
-
                         // === Data Parsing and Assignment ===
                         // Use current timestamp for all new records
                         const timestampMs = Date.now();
                         const timestampIso = new Date(timestampMs).toISOString();
-
                         const kolId = String(trade.kol?.id || '');
                         const kolName = String(trade.kol?.name || '');
                         const kolAvatar = String(trade.kol?.avatar || '');
                         const kolTwitterId = String(trade.kol?.twitterId || '');
-
                         const actionTypeKey = String(trade.actionType || '0');
                         const action = ACTION_TYPE_MAP[actionTypeKey] || 'unknown';
-
                         // Amount is the count of the token being received (toTokenCount)
                         const amount = String(trade.toTokenCount ?? '');
-
                         const contract = String(trade.toTokenAddress || '');
                         const chain = String(trade.chainName || 'BSC').toUpperCase(); // Normalise chain name
-
                         // NEW: Price/Value Fields
                         const usdtPrice = String(trade.usdtPrice ?? '');
                         const initialPrice = String(trade.initialPrice ?? '');
-
                         const fromToken = String(trade.fromToken || '');
                         const fromTokenAddress = String(trade.fromTokenAddress || '');
                         const fromTokenCount = String(trade.fromTokenCount ?? '');
-
-
                         const toToken = String(trade.toToken || '');
                         const toTokenAddress = String(trade.toTokenAddress || '');
                         const toTokenRemainCount = String(trade.toTokenRemainCount ?? '');
                         const walletType = trade.walletType;
-
                         const recentBuyerKols = JSON.stringify(trade.recentBuyerKols || []);
                         const recentSellerKols = JSON.stringify(trade.recentSellerKols || []);
-
                         // === Filtering and Insertion Logic ===
-
                         if (chain !== 'BSC') {
                             logger.debug(`⏩ Skipping trade from non-BSC chain: ${chain}`);
                             continue;
                         }
-
-                        console.log(trade, "trade"
-                        );
-
+                        console.log(trade, "trade");
                         logger.info(`✅ Processing BSC trade for QuestDB: ${kolName} ${action} ${amount} of ${contract} (${usdtPrice} USDT) at ${timestampIso}`);
-
-                        // NOTE ON DUPLICATES: 
-                        // The primary key for 'kol_trades' should ideally be (txHash, timestamp) 
+                        // NOTE ON DUPLICATES:
+                        // The primary key for 'kol_trades' should ideally be (txHash, timestamp)
                         // in QuestDB to prevent duplicates, or use an UPSERT method.
-                        // We are relying on the database layer to handle the deduplication 
+                        // We are relying on the database layer to handle the deduplication
                         // since we have a unique txHash.
-
                         await questdbService.insertBatch('kol_trades', [{
                             timestamp: timestampIso,  // Now ISO string
                             kolId,
@@ -184,7 +170,6 @@ export class KafkaService {
                             recentSellerKols,
                             chain
                         }]);
-
                         // Mark as processed only after successful insert
                     }
                 } catch (error) {
