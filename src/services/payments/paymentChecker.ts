@@ -75,6 +75,7 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 currentBalance = lamports / LAMPORTS_PER_SOL;
             } else if (chain === 'BSC') {
                 const balanceWei = await this.getBscBalanceWithRetry(address);
+                console.log("here getting bsc balance" , balanceWei)
                 if (balanceWei === undefined) {
                     logger.warn(`[Check] Skipping balance check for ${address} due to retries exceeded`);
                     return false;  // Treat as not confirmed for this check
