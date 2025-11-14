@@ -9,7 +9,6 @@ const kolService = new KolService();
  * Expects 'contractAddress' and optionally 'chain' in the query parameters.
  */
 export const getKolLeaderboards = async (req: Request, res: Response): Promise<void> => {
-    // We expect contractAddress to be a required query parameter
     const { contractAddress, chain } = req.query;
 
     if (!contractAddress || typeof contractAddress !== 'string') {
