@@ -61,8 +61,8 @@ const runMigrations = async () => {
   try {
     await questdbService.init();
     await runMigrations();
-    // await kafkaService.connect();  // NEW: Connect Kafka consumer
-    // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
+    await kafkaService.connect();  // NEW: Connect Kafka consumer
+    await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     // await tokenMetricsDexscreenerPoller.start();
     // await solanaPaymentCheckerService.startCron();
     // bscPaymentCheckerService.startCron();
