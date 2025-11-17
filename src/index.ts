@@ -63,7 +63,7 @@ const runMigrations = async () => {
     await runMigrations();
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
-    // await tokenMetricsDexscreenerPoller.start();
+    await tokenMetricsDexscreenerPoller.start();
     // await solanaPaymentCheckerService.startCron();
     // bscPaymentCheckerService.startCron();
     // paymentTransferCron.runTransferCron();

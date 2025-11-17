@@ -3,7 +3,7 @@ import { logger } from '../utils/logger';
 import { config } from '../utils/config';
 import { CronJob } from 'cron';
 import { TokenInfoResponse } from '../models/token.types';
-import { twitterService } from './twitterService';
+import { TwitterApi } from 'twitter-api-v2';
 
 class TokenMetricsDexscreenerPoller {
   private cronJob: CronJob<() => Promise<void>, () => void> | null = null;
@@ -18,7 +18,6 @@ class TokenMetricsDexscreenerPoller {
   async start() {
     if (this.running) return;
     await questdbService.init();
-    await twitterService.init();
     this.running = true;
 
     this.cronJob = new CronJob(
@@ -44,6 +43,122 @@ class TokenMetricsDexscreenerPoller {
     }
     this.running = false;
     logger.info('TokenMetricsDexscreenerPoller stopped');
+  }
+
+  private async getTwitterClient() {
+    try {
+      logger.debug('getTwitterClient: Attempting to fetch valid Twitter access token from database');
+      
+      // Get the most recent valid access token from the database
+      const query = `
+        SELECT 
+          access_token, 
+          refresh_token, 
+          expires_at,
+          username,
+          id
+        FROM twitter_auth 
+        WHERE access_token IS NOT NULL 
+          AND expires_at > now() 
+        ORDER BY updated_at DESC 
+        LIMIT 1`;
+      
+      logger.debug('getTwitterClient: Executing query:', { query });
+      const result = await questdbService.query(query);
+      logger.debug('getTwitterClient: Query result:', { 
+        rowsReturned: result.rows.length,
+        columns: result.columns,
+        firstRow: result.rows[0] ? '***REDACTED***' : 'No rows returned'
+      });
+
+      if (result.rows.length === 0) {
+        logger.error('No valid Twitter access token found in database - no rows returned');
+        return null;
+      }
+
+      const accessToken = result.rows[0][0]; // access_token is the first column in the SELECT
+      const username = result.rows[0][3] || 'unknown';
+      const userId = result.rows[0][4] || 'unknown';
+      const expiresAt = result.rows[0][2];
+      
+      logger.debug('getTwitterClient: Found access token', { 
+        username,
+        userId,
+        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : 'unknown',
+        tokenPrefix: accessToken ? `${accessToken.substring(0, 10)}...` : 'empty'
+      });
+
+      if (!accessToken) {
+        logger.error('Found row but access token is empty or undefined');
+        return null;
+      }
+
+      // Create a new Twitter client with the access token
+      logger.debug('getTwitterClient: Creating Twitter client with access token');
+      const client = new TwitterApi(accessToken);
+      
+      // Verify the token is valid by making a simple API call
+      try {
+        logger.debug('getTwitterClient: Verifying token with Twitter API');
+        const user = await client.v2.me();
+        logger.debug('getTwitterClient: Successfully verified token for user:', { 
+          username: user.data.username,
+          id: user.data.id
+        });
+      } catch (error: any) {
+        const verifyError = error as {
+          message: string;
+          code?: string | number;
+          status?: number;
+        };
+        logger.error('getTwitterClient: Failed to verify token with Twitter API:', {
+          error: verifyError.message,
+          code: verifyError.code,
+          status: verifyError.status
+        });
+        return null;
+      }
+      
+      return client;
+    } catch (error: any) {
+      const err = error as {
+        message: string;
+        stack?: string;
+        code?: string | number;
+        status?: number;
+      };
+      logger.error('Error in getTwitterClient:', {
+        error: err.message,
+        stack: err.stack,
+        code: err.code,
+        status: err.status
+      });
+      return null;
+    }
+  }
+
+  private async postToTwitter(message: string): Promise<boolean> {
+    try {
+      const client = await this.getTwitterClient();
+      if (!client) {
+        logger.error('Could not create Twitter client - no valid access token found');
+        return false;
+      }
+
+      const truncatedMessage = message.length > 280 ? message.substring(0, 277) + '...' : message;
+      const tweet = await client.v2.tweet(truncatedMessage);
+      
+      if (tweet) {
+        logger.info(`Posted to Twitter: ${truncatedMessage}`);
+        return true;
+      } else {
+        logger.error('Failed to post to Twitter: No response from API');
+        return false;
+      }
+    } catch (error) {
+      logger.error('Error posting to Twitter:', error);
+      return false;
+    }
   }
 
   private async fetchTokenDexInfo() {
@@ -294,7 +409,7 @@ ${item.contract} 👉 ${dexLink}
 
 #Crypto #DeFi #Tokens`;
                 logger.info(`[Twitter] Preparing alert tweet: "${tweetText}"`);
-                const tweetSuccess = await twitterService.postTweet(tweetText);
+                const tweetSuccess = await this.postToTwitter(tweetText);
                 if (tweetSuccess) {
                   logger.info(`[Twitter] ✅ Alert tweet posted successfully for ${item.contract}`);
                 } else {

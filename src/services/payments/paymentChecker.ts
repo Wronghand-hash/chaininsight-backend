@@ -122,15 +122,33 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
         const checkPurchaseSql = `
             SELECT count(*) as c 
             FROM userPurchase 
-            WHERE twitterId = '${twitterId.replace(/'/g, "''")}' AND serviceType = '${serviceType.replace(/'/g, "''")}' AND address = '${address.replace(/'/g, "''")}';
+            WHERE twitterId = '${twitterId.replace(/'/g, "''")}' 
+            AND serviceType = '${serviceType.replace(/'/g, "''")}' 
+            AND address = '${address.replace(/'/g, "''")}';
         `;
         const checkRes: QueryResult = await questdbService.query(checkPurchaseSql);
         const exists = Number(checkRes.rows[0]?.[0]) > 0;
 
         if (!exists) {
-            const nowIso = new Date().toISOString();
-            const expireAt = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)).toISOString();  // 30 days
+            const now = new Date();
+            const nowIso = now.toISOString();
+            
+            // Set expiration based on service type
+            let expireAt: Date;
+            let totalPostsAllowed: number;
+            
+            if (serviceType === 'oneDayPlan') {
+                expireAt = new Date(now.getTime() + (24 * 60 * 60 * 1000)); // 1 day
+                totalPostsAllowed = 336;
+            } else {
+                // Default to 1 day if service type is not recognized
+                expireAt = new Date(now.getTime() + (24 * 60 * 60 * 1000));
+                totalPostsAllowed = 10;
+            }
 
+            const expireAtIso = expireAt.toISOString();
+
+            // Create user purchase record
             const purchaseRow: Record<string, any> = {
                 timestamp: nowIso,
                 twitterId,
@@ -138,11 +156,40 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 address,
                 serviceType,
                 created_at: nowIso,
-                expire_at: expireAt
+                expire_at: expireAtIso
             };
 
-            await questdbService.insertBatch('userPurchase', [purchaseRow]);
-            logger.info(`💾 Added userPurchase for ${twitterId} (${serviceType}) with address ${address}`);
+            // Create user post plan
+            const postPlanRow: Record<string, any> = {
+                timestamp: nowIso,
+                twitter_id: twitterId,
+                username: '', // You might want to fetch the username from somewhere
+                service_type: serviceType,
+                created_at: nowIso,
+                expire_at: expireAtIso,
+                total_posts_allowed: totalPostsAllowed,
+                total_posts_count: 0
+            };
+
+            // Use a transaction to ensure both operations succeed or fail together
+            try {
+                await questdbService.query('BEGIN');
+
+                // Insert purchase record
+                await questdbService.insertBatch('userPurchase', [purchaseRow]);
+                
+                // Insert post plan
+                await questdbService.insertBatch('user_posts_plans', [postPlanRow]);
+                
+                await questdbService.query('COMMIT');
+                
+                logger.info(`💾 Added userPurchase and post plan for ${twitterId} (${serviceType}) with address ${address}`);
+                logger.info(`📝 User ${twitterId} can post ${totalPostsAllowed} times until ${expireAtIso}`);
+            } catch (error) {
+                await questdbService.query('ROLLBACK');
+                logger.error('❌ Failed to create purchase and post plan:', error);
+                throw error;
+            }
         } else {
             logger.debug(`[Check] userPurchase already exists for ${twitterId} (${serviceType}) + address ${address}`);
         }

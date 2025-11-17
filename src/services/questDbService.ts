@@ -164,15 +164,53 @@ export class QuestDBService {
           expire_at TIMESTAMP,
           serviceType STRING
         ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`
+      },
+      {
+        name: 'user_posts_plans',
+        create: `CREATE TABLE IF NOT EXISTS user_posts_plans (
+          timestamp TIMESTAMP,
+          twitter_id STRING,
+          username STRING,
+          service_type STRING,
+          created_at TIMESTAMP,
+          expire_at TIMESTAMP,
+          total_posts_allowed INT,
+          total_posts_count INT
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal}`
       }
     ];
 
-    for (const table of tables) {
-      await this.pgClient.query(table.create);
-      logger.debug(`✅ Table created: ${table.name}`);
+    try {
+      for (const table of tables) {
+        try {
+          logger.debug(`Creating table: ${table.name}`);
+          if (Array.isArray(table.create)) {
+            for (const query of table.create) {
+              await this.pgClient.query(query);
+            }
+          } else {
+            await this.pgClient.query(table.create);
+            // Verify table was created
+            const checkTable = await this.pgClient.query(
+              `SELECT table_name FROM tables() WHERE table_name = '${table.name}';`
+            );
+            if (checkTable.rows.length === 0) {
+              logger.error(`❌ Table ${table.name} was not created successfully`);
+            } else {
+              logger.debug(`✅ Verified table exists: ${table.name}`);
+            }
+          }
+          logger.debug(`✅ Table created: ${table.name}`);
+        } catch (error) {
+          logger.error(`❌ Error creating table ${table.name}:`, error);
+          throw error;
+        }
+      }
+      logger.info('✅ QuestDB tables created');
+    } catch (error) {
+      logger.error('❌ Error initializing QuestDB tables:', error);
+      throw error;
     }
-
-    logger.info('✅ QuestDB tables created');
   }
 
   private ensureInit(): void {
@@ -277,6 +315,56 @@ export class QuestDBService {
             values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType];
           }
           await this.pgClient.query(sql, values);
+          continue;
+        }
+
+        // Handle user_posts_plans table
+        if (table === 'user_posts_plans') {
+          const nowIso = new Date().toISOString();
+          const ts = String(row.timestamp || nowIso);
+          const twitterId = String(row.twitter_id || '');
+          const username = String(row.username || '');
+          const serviceType = String(row.service_type || 'oneDayPlan');
+          const createdAt = String(row.created_at || nowIso);
+          const expireAt = String(row.expire_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+          const totalPostsAllowed = Number(row.total_posts_allowed || 336);
+          const totalPostsCount = Number(row.total_posts_count || 0);
+
+          // Check if a plan already exists for this user and service type
+          const checkSql = `SELECT count(*) as c FROM user_posts_plans WHERE twitter_id = $1 AND service_type = $2;`;
+          const checkRes = await this.pgClient.query(checkSql, [twitterId, serviceType]);
+          
+          if (checkRes.rows[0]?.c > 0) {
+            // Update existing plan
+            const updateSql = `
+              UPDATE user_posts_plans 
+              SET expire_at = $1, 
+                  total_posts_allowed = $2, 
+                  total_posts_count = $3,
+                  timestamp = $4
+              WHERE twitter_id = $5 AND service_type = $6;
+            `;
+            await this.pgClient.query(updateSql, [
+              expireAt, 
+              totalPostsAllowed, 
+              totalPostsCount,
+              ts,
+              twitterId,
+              serviceType
+            ]);
+          } else {
+            // Insert new plan
+            const insertSql = `
+              INSERT INTO user_posts_plans (
+                timestamp, twitter_id, username, service_type, 
+                created_at, expire_at, total_posts_allowed, total_posts_count
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+            `;
+            await this.pgClient.query(insertSql, [
+              ts, twitterId, username, serviceType, 
+              createdAt, expireAt, totalPostsAllowed, totalPostsCount
+            ]);
+          }
           continue;
         }
 
