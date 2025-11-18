@@ -14,6 +14,7 @@ import { walletService } from './services/payments/paymentService';
 import { solanaPaymentCheckerService } from './services/payments/checkSOLpayment';
 import { bscPaymentCheckerService } from './services/payments/checkBSCpayment';
 import { paymentTransferCron } from './services/crons/paymentTrasnfer.cron';
+import { freeTokenMetricsDexscreenerPoller } from './services/freeTokenMetricsDexscreenerPoller';
 dotenv.config();
 
 const app: Application = express();
@@ -63,7 +64,8 @@ const runMigrations = async () => {
     await runMigrations();
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
-    await tokenMetricsDexscreenerPoller.start();
+    // await tokenMetricsDexscreenerPoller.start();
+    await freeTokenMetricsDexscreenerPoller.start()
     // await solanaPaymentCheckerService.startCron();
     // bscPaymentCheckerService.startCron();
     // paymentTransferCron.runTransferCron();

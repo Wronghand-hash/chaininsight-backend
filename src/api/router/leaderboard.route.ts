@@ -4,6 +4,7 @@ import { getTokenDetails } from '../controllers/tokenInfo.controller';
 import { kolTradeService } from '../services/kolsActivity.service';
 import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
+import { freeTrialController } from '../controllers/freeTrial.controller';
 
 const kolsLeaderboardRouter = Router();
 /**
@@ -323,6 +324,98 @@ kolsLeaderboardRouter.post('/auth/twitter/logout', handleTwitterLogout);
  *         description: Failed to generate
  */
 kolsLeaderboardRouter.get('/auth/twitter/init', generateTwitterLoginUrl);
+
+
+/**
+ * @swagger
+ * /scanner/api/v1/kol/leaderboard/free-trial/start:
+ *   post:
+ *     summary: Start a new free trial
+ *     tags: [Free Trial]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - twitterId
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 description: User's username
+ *               twitterId:
+ *                 type: string
+ *                 description: User's Twitter ID
+ *     responses:
+ *       '201':
+ *         description: Free trial started successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 postsRemaining:
+ *                   type: number
+ *                 expiryDate:
+ *                   type: string
+ *       '400':
+ *         description: Invalid input or free trial already used
+ *       '500':
+ *         description: Server error
+ */
+// Mount free trial endpoints under /leaderboard
+kolsLeaderboardRouter.post('/leaderboard/free-trial/start', freeTrialController.startFreeTrial);
+
+/**
+ * @swagger
+ * /scanner/api/v1/kol/leaderboard/free-trial/status/{username}:
+ *   get:
+ *     summary: Get free trial status for a user
+ *     tags: [Free Trial]
+ *     parameters:
+ *       - in: path
+ *         name: username
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Username to check status for
+ *     responses:
+ *       '200':
+ *         description: Returns free trial status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 hasTrial:
+ *                   type: boolean
+ *                 postCount:
+ *                   type: number
+ *                 maxPosts:
+ *                   type: number
+ *                 postsRemaining:
+ *                   type: number
+ *                 isExpired:
+ *                   type: boolean
+ *                 expiryDate:
+ *                   type: string
+ *                 canPost:
+ *                   type: boolean
+ *       '400':
+ *         description: Username is required
+ *       '500':
+ *         description: Server error
+ */
+kolsLeaderboardRouter.get('/leaderboard/free-trial/status/:username', freeTrialController.getTrialStatus);
+
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
 // components:

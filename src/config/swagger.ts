@@ -3,7 +3,7 @@ import { version } from '../../package.json';
 
 const options: swaggerJsdoc.Options = {
     definition: {
-        openapi: '4.0.2',
+        openapi: '3.1.0',
         info: {
             title: 'ChainInsight API Documentation',
             version,
@@ -188,7 +188,17 @@ const options: swaggerJsdoc.Options = {
         security: [
             {
                 bearerAuth: [],
+            }
+        ],
+        tags: [
+            {
+                name: 'Free Trial',
+                description: 'Endpoints for managing free trial subscriptions'
             },
+            {
+                name: 'KOL Leaderboard',
+                description: 'Endpoints for KOL leaderboard data'
+            }
         ],
     },
     apis: ['./src/api/**/*.ts'], // Path to the API routes
