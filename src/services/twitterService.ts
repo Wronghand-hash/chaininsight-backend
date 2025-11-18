@@ -151,6 +151,7 @@ class TwitterService {
                 redirectUri,
             });
             const { accessToken, refreshToken, expiresIn, scope } = tokenData;
+            console.log("tokken data", tokenData)
             logger.debug('handleLoginCallback: Token exchange successful, expiresIn:', expiresIn, 'scope:', scope);
 
             // Get user info with more fields

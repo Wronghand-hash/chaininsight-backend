@@ -12,7 +12,7 @@ export const generateTwitterLoginUrl = async (req: Request, res: Response): Prom
         const redirectUri = NGROK_REDIRECT_URI;
         logger.debug('generateTwitterLoginUrl: Final processed redirectUri:', redirectUri);
 
-        const scopes = ['users.read', 'tweet.read', "tweet.write"];
+        const scopes = ['users.read', 'tweet.read', "tweet.write", 'offline.access'];
         logger.debug('generateTwitterLoginUrl: Using scopes:', scopes);
 
         const { url, state, codeVerifier } = await twitterService.generateLoginUrl(redirectUri, scopes);

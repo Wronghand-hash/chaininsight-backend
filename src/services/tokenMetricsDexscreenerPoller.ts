@@ -82,7 +82,31 @@ class TokenMetricsDexscreenerPoller {
     try {
       logger.debug('getTwitterClient: Attempting to fetch valid Twitter access token from database');
 
-      // Get the most recent valid access token from the database
+      // First, get the username from user_posts_plans table
+      const userQuery = `
+        SELECT DISTINCT twitter_id 
+        FROM user_posts_plans 
+        WHERE username IS NOT NULL 
+        LIMIT 1`;
+
+      logger.debug('getTwitterClient: Fetching username from user_posts_plans');
+      const userResult = await questdbService.query(userQuery);
+
+      if (userResult.rows.length === 0) {
+        logger.error('No username found in user_posts_plans table');
+        return null;
+      }
+
+      const twitterUsername = userResult.rows[0][0]?.trim();
+
+      if (!twitterUsername) {
+        logger.error('Found empty username in user_posts_plans table');
+        return null;
+      }
+
+      logger.debug('getTwitterClient: Found username in user_posts_plans:', { username: twitterUsername });
+
+      // Get the most recent token for the username, even if expired
       const query = `
         SELECT 
           access_token, 
@@ -91,8 +115,8 @@ class TokenMetricsDexscreenerPoller {
           username,
           id
         FROM twitter_auth 
-        WHERE access_token IS NOT NULL 
-          AND expires_at > now() 
+        WHERE username = '${twitterUsername.replace(/'/g, "''")}'
+          AND access_token IS NOT NULL 
         ORDER BY updated_at DESC 
         LIMIT 1`;
 
@@ -131,54 +155,58 @@ class TokenMetricsDexscreenerPoller {
       let currentRefreshToken = refreshToken;
       let currentExpiresAt = expiresAt;
 
-      // Auto-refresh if token expires soon (within 5 minutes)
-      // if (expiresAt && new Date(expiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
-      //   logger.info('getTwitterClient: Access token nearing expiry - attempting auto-refresh');
+      // Refresh token if it's expired or about to expire (within 5 minutes)
+      const now = new Date();
+      const tokenExpiry = expiresAt ? (typeof expiresAt === 'string' ? new Date(expiresAt) : expiresAt) : null;
+      const shouldRefresh = !tokenExpiry || tokenExpiry < new Date(now.getTime() + 5 * 60 * 1000);
 
-      //   if (!refreshToken) {
-      //     logger.error('getTwitterClient: No refresh token available for auto-refresh');
-      //     return null;
-      //   }
+      if (shouldRefresh) {
+        logger.info('getTwitterClient: Access token nearing expiry - attempting auto-refresh');
 
-      //   try {
-      //     // Create app client for refresh (requires client_id and client_secret in config)
-      //     const appClient = new TwitterApi({
-      //       clientId: config.twitter.clientId,
-      //       clientSecret: config.twitter.clientSecret,
-      //     });
+        if (!refreshToken) {
+          logger.error('getTwitterClient: No refresh token available for auto-refresh');
+          return null;
+        }
 
-      //     const refreshed = await appClient.refreshOAuth2Token(refreshToken);
+        try {
+          // Create app client for refresh (requires client_id and client_secret in config)
+          const appClient = new TwitterApi({
+            clientId: config.twitter.clientId,
+            clientSecret: config.twitter.clientSecret,
+          });
 
-      //     currentAccessToken = refreshed.accessToken;
-      //     currentRefreshToken = refreshed.refreshToken;
-      //     currentExpiresAt = new Date(Date.now() + (refreshed.expiresIn || 7200) * 1000).toISOString();
+          const refreshed = await appClient.refreshOAuth2Token(refreshToken);
 
-      //     // Update DB with new tokens
-      //     const updateQuery = `
-      //       UPDATE twitter_auth 
-      //       SET 
-      //         access_token = '${currentAccessToken}', 
-      //         refresh_token = '${currentRefreshToken}', 
-      //         expires_at = '${currentExpiresAt}',
-      //         updated_at = now()
-      //       WHERE id = '${userId}';
-      //     `;
-      //     await questdbService.query(updateQuery);
+          currentAccessToken = refreshed.accessToken;
+          currentRefreshToken = refreshed.refreshToken;
+          currentExpiresAt = new Date(Date.now() + (refreshed.expiresIn || 7200) * 1000).toISOString();
 
-      //     logger.info('getTwitterClient: Successfully refreshed tokens and updated DB', {
-      //       username,
-      //       newExpiresAt: currentExpiresAt,
-      //       newTokenPrefix: `${currentAccessToken.substring(0, 10)}...`
-      //     });
-      //   } catch (refreshError: any) {
-      //     logger.error('getTwitterClient: Auto-refresh failed', {
-      //       error: refreshError.message,
-      //       code: refreshError.code,
-      //       status: refreshError.status
-      //     });
-      //     // Fall back to original token (might fail verification next)
-      //   }
-      // }
+          // Update DB with new tokens using parameterized query
+          const updateQuery = `
+            UPDATE twitter_auth 
+            SET 
+              access_token = '${currentAccessToken.replace(/'/g, "''")}', 
+              refresh_token = '${currentRefreshToken.replace(/'/g, "''")}', 
+              expires_at = to_timestamp('${currentExpiresAt}', 'yyyy-MM-ddTHH:mm:ss.SSSZ'),
+              updated_at = now()
+            WHERE id = '${userId.replace(/'/g, "''")}';
+          `;
+          await questdbService.query(updateQuery);
+
+          logger.info('getTwitterClient: Successfully refreshed tokens and updated DB', {
+            username,
+            newExpiresAt: currentExpiresAt,
+            newTokenPrefix: `${currentAccessToken.substring(0, 10)}...`
+          });
+        } catch (refreshError: any) {
+          logger.error('getTwitterClient: Auto-refresh failed', {
+            error: refreshError.message,
+            code: refreshError.code,
+            status: refreshError.status
+          });
+          // Fall back to original token (might fail verification next)
+        }
+      }
 
       // Create a new Twitter client with the (potentially refreshed) access token
       logger.debug('getTwitterClient: Creating Twitter client with access token');

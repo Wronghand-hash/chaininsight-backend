@@ -177,6 +177,7 @@ export class QuestDBService {
           username STRING,
           service_type STRING,
           created_at TIMESTAMP,
+          updated_at TIMESTAMP,
           expire_at TIMESTAMP,
           total_posts_allowed INT,
           total_posts_count INT,
@@ -187,6 +188,18 @@ export class QuestDBService {
     ];
 
     try {
+      // Add updated_at column to user_posts_plans if it doesn't exist
+      try {
+        await this.pgClient.query(`
+          ALTER TABLE user_posts_plans 
+          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP
+        `);
+        logger.info('Successfully added updated_at column to user_posts_plans table');
+      } catch (migrationError) {
+        logger.error('Error adding updated_at column to user_posts_plans table:', migrationError);
+        // Continue with table creation even if migration fails
+      }
+
       for (const table of tables) {
         try {
           logger.debug(`Creating table: ${table.name}`);
