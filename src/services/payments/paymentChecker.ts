@@ -52,8 +52,15 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
         twitterId: string,
         amount: number,
         serviceType: string,
-        address: string
+        address: string,
+        token: string = '',
+        twitter_community: string = ''
     ): Promise<boolean> {
+        // Validate address before proceeding
+        if (!address || (chain === 'SOL' && !PublicKey.isOnCurve(address))) {
+            logger.warn(`[Check] Invalid or missing address for ${twitterId}: ${address}`);
+            return false;
+        }
         try {
             // First, check if already confirmed in DB (quick exit)
             const checkStatusSql = `
@@ -63,7 +70,7 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
             const statusRes: QueryResult = await questdbService.query(checkStatusSql);
             if (statusRes.rows.length > 0 && statusRes.rows[0][0] === true) {
                 logger.info(`[Check] Payment already confirmed in DB for ${twitterId} (${address})`);
-                await this.handlePurchaseCreation(twitterId, amount, serviceType, address);
+                await this.handlePurchaseCreation(twitterId, amount, serviceType, address, token, twitter_community);
                 return true;
             }
 
@@ -100,7 +107,7 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 }
 
                 // Handle purchase creation
-                await this.handlePurchaseCreation(twitterId, amount, serviceType, address);
+                await this.handlePurchaseCreation(twitterId, amount, serviceType, address, token, twitter_community);
                 return true;
             }
 
@@ -116,7 +123,9 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
         twitterId: string,
         amount: number,
         serviceType: string,
-        address: string
+        address: string,
+        token: string = '',
+        twitter_community: string = ''
     ): Promise<void> {
         // Check if purchase already exists
         const checkPurchaseSql = `
@@ -156,19 +165,22 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 address,
                 serviceType,
                 created_at: nowIso,
-                expire_at: expireAtIso
+                expire_at: expireAtIso,
+                token,
+                twitter_community
             };
 
             // Create user post plan
             const postPlanRow: Record<string, any> = {
-                timestamp: nowIso,
                 twitter_id: twitterId,
                 username: '', // You might want to fetch the username from somewhere
                 service_type: serviceType,
                 created_at: nowIso,
                 expire_at: expireAtIso,
                 total_posts_allowed: totalPostsAllowed,
-                total_posts_count: 0
+                total_posts_count: 0,
+                token,
+                twitter_community
             };
 
             // Use a transaction to ensure both operations succeed or fail together

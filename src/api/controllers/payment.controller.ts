@@ -11,9 +11,9 @@ const isValidChain = (chain: any): chain is Chain => {
 };
 
 const generateWalletKeypair = async (req: Request, res: Response): Promise<void> => {
-    const { chain, twitterId, amount, serviceType, wallet } = req.body;
+    const { chain, twitterId, amount, serviceType, wallet, token, twitter_community } = req.body;
 
-    if (!chain || !twitterId || amount === undefined || !wallet) {
+    if (!chain || !twitterId || amount === undefined || !wallet || !token || !twitter_community) {
         logger.warn('Missing required parameters for wallet generation', req.body);
         res.status(400).json({ error: 'Missing required parameters: chain, twitterId, amount, and wallet are required.' });
         return;
@@ -38,7 +38,9 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
             String(twitterId),
             Number(amount),
             serviceType ? String(serviceType) : 'x_alerts_service',
-            wallet
+            wallet,
+            token,
+            twitter_community
         );
     } catch (error) {
         logger.error('Error generating wallet keypair in controller', { error, chain, twitterId });
@@ -78,7 +80,7 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
         // Query for the latest payment entry for this twitterId and chain
         const escTwitterId = String(twitterId).replace(/'/g, "''");
         const statusSql = `
-            SELECT amount, serviceType, address, paymentStatus, status 
+            SELECT amount, serviceType, address, paymentStatus, status, token, twitter_community 
             FROM payment_history 
             WHERE twitterId = '${escTwitterId}' AND chain = '${chain}' 
             ORDER BY timestamp DESC LIMIT 1;
@@ -90,7 +92,7 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const [amount, serviceType, address, paymentStatus, dbStatus] = statusRes.rows[0];
+        const [amount, serviceType, address, paymentStatus, dbStatus, token, twitter_community] = statusRes.rows[0];
 
         if (dbStatus === 'completed') {
             // Already completed
@@ -109,7 +111,9 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
             String(twitterId),
             Number(amount),
             String(serviceType),
-            String(address)
+            String(address),
+            String(token),
+            String(twitter_community)
         );
 
         if (confirmed) {

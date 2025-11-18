@@ -11,7 +11,9 @@ export class WalletService {
         twitterId: string,
         amount: number,
         serviceType: string = 'x_alerts_service',
-        wallet: string
+        wallet: string,
+        token: string,
+        twitter_community: string
     ): Promise<{
         chain: Chain;
         twitterId: string;
@@ -20,6 +22,8 @@ export class WalletService {
         wallet: string;
         publicKey: string;
         address: string;
+        token: string;
+        twitter_community: string;
     }> {
         let publicKey: string;
         let privateKey: string;
@@ -47,9 +51,11 @@ export class WalletService {
             amount,
             serviceType,
             chain,
+            address,  // Add this line
+            publicKey,  // Add this line
             wallet,
-            address,
-            publicKey,
+            token,
+            twitter_community,
             privateKey,  // Store securely; consider hashing or encryption
             paymentStatus: false,
             status: 'pending'
@@ -71,7 +77,8 @@ export class WalletService {
             amount,
             serviceType,
             address,
-            publicKey,
+            token,
+            twitter_community,
             privateKey: privateKey.substring(0, 10) + '...',
         });
 
@@ -83,6 +90,8 @@ export class WalletService {
             wallet,
             publicKey,
             address,
+            token,
+            twitter_community,
         };
     }
 }

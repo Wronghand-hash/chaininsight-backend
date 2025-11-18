@@ -150,7 +150,9 @@ export class QuestDBService {
           publicKey STRING,
           privateKey STRING,  -- Store securely; consider encryption in production
           paymentStatus BOOLEAN,
-          status STRING  -- e.g., 'completed', 'pending'
+          status STRING,  -- e.g., 'completed', 'pending'
+          twitter_community STRING,
+          token STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
       {
@@ -162,7 +164,9 @@ export class QuestDBService {
           address SYMBOL,
           created_at TIMESTAMP,
           expire_at TIMESTAMP,
-          serviceType STRING
+          serviceType STRING,
+          twitter_community STRING,
+          token STRING
         ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`
       },
       {
@@ -175,7 +179,9 @@ export class QuestDBService {
           created_at TIMESTAMP,
           expire_at TIMESTAMP,
           total_posts_allowed INT,
-          total_posts_count INT
+          total_posts_count INT,
+          twitter_community STRING,
+          token STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal}`
       }
     ];
@@ -301,18 +307,18 @@ export class QuestDBService {
           let sql: string;
           let values: any[];
           if (table === 'payment_history') {
-            sql = `INSERT INTO payment_history (timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`;
-            values = [ts, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status];
+            sql = `INSERT INTO payment_history (timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status, twitter_community, token)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);`;
+            values = [ts, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status, row.twitter_community || '', row.token || ''];
           } else {
             const createdAt = new Date(nowIso);
             const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));
             const expireAtIso = expireAt.toISOString();
             const checkCount = await this.pgClient.query('SELECT count(*) as c FROM userPurchase;');
             const nextId = (checkCount.rows[0]?.c || 0) + 1;
-            sql = `INSERT INTO userPurchase (id, twitterId, amount, address, created_at, expire_at, serviceType)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7);`;
-            values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType];
+            sql = `INSERT INTO userPurchase (id, twitterId, amount, address, created_at, expire_at, serviceType, twitter_community, token)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`;
+            values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType, row.twitter_community || '', row.token || ''];
           }
           await this.pgClient.query(sql, values);
           continue;
@@ -335,34 +341,32 @@ export class QuestDBService {
           const checkRes = await this.pgClient.query(checkSql, [twitterId, serviceType]);
           
           if (checkRes.rows[0]?.c > 0) {
-            // Update existing plan
+            // Update existing plan - don't update the timestamp as it's a designated column
+            // Using string interpolation for QuestDB compatibility
             const updateSql = `
               UPDATE user_posts_plans 
-              SET expire_at = $1, 
-                  total_posts_allowed = $2, 
-                  total_posts_count = $3,
-                  timestamp = $4
-              WHERE twitter_id = $5 AND service_type = $6;
+              SET expire_at = '${expireAt.replace(/'/g, "''")}', 
+                  total_posts_allowed = ${totalPostsAllowed}, 
+                  total_posts_count = ${totalPostsCount},
+                  twitter_community = '${(row.twitter_community || '').replace(/'/g, "''")}',
+                  token = '${(row.token || '').replace(/'/g, "''")}'
+              WHERE twitter_id = '${twitterId.replace(/'/g, "''")}' 
+              AND service_type = '${serviceType.replace(/'/g, "''")}';
             `;
-            await this.pgClient.query(updateSql, [
-              expireAt, 
-              totalPostsAllowed, 
-              totalPostsCount,
-              ts,
-              twitterId,
-              serviceType
-            ]);
+            await this.pgClient.query(updateSql);
           } else {
             // Insert new plan
             const insertSql = `
               INSERT INTO user_posts_plans (
                 timestamp, twitter_id, username, service_type, 
-                created_at, expire_at, total_posts_allowed, total_posts_count
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+                created_at, expire_at, total_posts_allowed, total_posts_count,
+                twitter_community, token
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
             `;
             await this.pgClient.query(insertSql, [
               ts, twitterId, username, serviceType, 
-              createdAt, expireAt, totalPostsAllowed, totalPostsCount
+              createdAt, expireAt, totalPostsAllowed, totalPostsCount,
+              row.twitter_community || '', row.token || ''
             ]);
           }
           continue;

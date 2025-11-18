@@ -161,6 +161,12 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *               serviceType:
  *                 type: string
  *                 description: Optional service type
+ *               token:
+ *                 type: string
+ *                 description: Optional token  
+ *               twitter_community:
+ *                 type: string
+ *                 description: Optional twitter community
  *     responses:
  *       200:
  *         description: Wallet generated successfully
