@@ -72,16 +72,16 @@ class FreeTokenMetricsDexscreenerPoller {
             }
 
             const query = `
-        SELECT 
-          access_token, 
-          refresh_token, 
-          expires_at,
-          username,
-        FROM twitter_auth 
-        WHERE username = '${twitterUsername.replace(/'/g, "''")}'
-          AND access_token IS NOT NULL 
-        ORDER BY updated_at DESC 
-        LIMIT 1`;
+    SELECT 
+      access_token, 
+      refresh_token, 
+      expires_at,
+      username
+    FROM twitter_auth 
+    WHERE username = '${twitterUsername.replace(/'/g, "''")}'
+      AND access_token IS NOT NULL 
+    ORDER BY updated_at DESC 
+    LIMIT 1`;
 
             const result = await questdbService.query(query);
 
@@ -158,15 +158,18 @@ class FreeTokenMetricsDexscreenerPoller {
         try {
             logger.info('[Free] Fetching token metrics from Dexscreener for free trial users');
 
-            // Fetch active free trial users with non-empty token addresses
+            // In fetchTokenDexInfo method, update the query to:
             const res = await questdbService.query(
-                `SELECT DISTINCT token AS contract, 'SOLANA' as chain 
-                 FROM user_posts_plans 
-                 WHERE token IS NOT NULL 
-                 AND token != '' 
-                 AND service_type = 'freeTrial'
-                 AND expire_at > now()
-                 ORDER BY created_at DESC;`
+                `SELECT DISTINCT 
+        token AS contract, 
+        'SOLANA' as chain,
+        created_at
+     FROM user_posts_plans 
+     WHERE token IS NOT NULL 
+     AND token != '' 
+     AND service_type = 'freeTrial'
+     AND expire_at > now()
+     ORDER BY created_at DESC;`
             );
 
             const contractIdx = res.columns.indexOf('contract');
@@ -189,7 +192,7 @@ class FreeTokenMetricsDexscreenerPoller {
             for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
                 const batch = batches[batchIndex];
                 const batchUrl = `${config.baseUrls.dexscreener}${batch.join(',')}`;
-                
+
                 try {
                     logger.info(`[Free][Dexscreener][batch:${batchIndex + 1}/${batches.length}] Fetching ${batch.length} contracts`);
                     const resp = await fetch(batchUrl);
@@ -290,7 +293,7 @@ CA: ${item.contract}
                                         await questdbService.query(insertQuery);
                                     }
                                 } catch (err) {
-                                    await questdbService.query(insertQuery).catch(e => 
+                                    await questdbService.query(insertQuery).catch(e =>
                                         logger.error(`[Free][DB] Failed to insert record for ${item.contract}:`, e)
                                     );
                                 }
@@ -314,7 +317,7 @@ CA: ${item.contract}
     private async postToTwitter(params: { tweetText: string; contract: string; chain: string }) {
         const { tweetText, contract, chain } = params;
         const twitterClient = await this.getTwitterClient();
-        
+
         if (!twitterClient) {
             logger.error('[Free] No valid Twitter client available');
             return null;
