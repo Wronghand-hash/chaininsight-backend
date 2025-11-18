@@ -23,7 +23,7 @@ const options: swaggerJsdoc.Options = {
                 description: "ngrok server"
             },
             {
-                url: "https://api.hypeignite.io/scanner/api/v1",
+                url: "https://api.hypeignite.io/",
                 description: "production server"
             }
         ],

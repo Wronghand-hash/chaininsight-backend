@@ -59,7 +59,7 @@ export class FreeTrialController {
       if (checkResult.rows.length > 0) {
         const trialData = checkResult.rows[0];
         const postCount = parseInt(trialData[1] || '0');
-        
+
         if (postCount >= this.MAX_FREE_POSTS) {
           return res.status(400).json({
             success: false,
@@ -121,7 +121,7 @@ export class FreeTrialController {
         username,
         twitterId
       });
-      
+
       return res.status(500).json({
         success: false,
         message: 'Failed to start free trial',
@@ -185,10 +185,80 @@ export class FreeTrialController {
         error: error.message,
         username
       });
-      
+
       return res.status(500).json({
         success: false,
         message: 'Failed to get free trial status',
+        error: error.message
+      });
+    }
+  };
+
+  /**
+   * Get all posts plans for a user by Twitter ID
+   * GET /api/leaderboard/user-posts-plans/:twitterId
+   */
+  public getUserPostsPlans = async (req: Request, res: Response) => {
+    const { twitter_id } = req.query;
+
+    if (!twitter_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Twitter username is required as a query parameter (username)'
+      });
+    }
+
+    try {
+      const query = `
+        SELECT 
+          username,
+          twitter_id as "twitterId",
+          service_type as "serviceType",
+          total_posts_count as "postsCount",
+          total_posts_allowed as "postsAllowed",
+          expire_at as "expiryDate",
+          created_at as "createdAt",
+          updated_at as "updatedAt",
+          twitter_community as "twitterCommunity"
+        FROM user_posts_plans 
+        WHERE twitter_id = '${String(twitter_id).replace(/'/g, "''")}'
+        ORDER BY created_at DESC`;
+
+      const result = await questdbService.query(query);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'User not found with the provided Twitter ID'
+        });
+      }
+
+      const plans = result.rows.map(row => ({
+        username: row[0],
+        twitterId: row[1],
+        serviceType: row[2],
+        postsCount: parseInt(row[3] || '0'),
+        postsAllowed: parseInt(row[4] || '0'),
+        expiryDate: row[5] ? new Date(row[5]).toISOString() : null,
+        createdAt: row[6] ? new Date(row[6]).toISOString() : null,
+        updatedAt: row[7] ? new Date(row[7]).toISOString() : null,
+        twitterCommunity: row[8]
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: plans
+      });
+
+    } catch (error: any) {
+      logger.error('Error getting user posts plans:', {
+        error: error.message,
+        twitter_id
+      });
+
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to get user posts plans',
         error: error.message
       });
     }
@@ -260,7 +330,7 @@ export class FreeTrialController {
         error: error.message,
         username
       });
-      
+
       return res.status(500).json({
         success: false,
         message: 'Failed to verify free trial status',

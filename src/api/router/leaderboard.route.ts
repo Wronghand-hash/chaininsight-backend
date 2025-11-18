@@ -416,6 +416,70 @@ kolsLeaderboardRouter.post('/leaderboard/free-trial/start', freeTrialController.
  */
 kolsLeaderboardRouter.get('/leaderboard/free-trial/status/:username', freeTrialController.getTrialStatus);
 
+/**
+ * @swagger
+ * /scanner/api/v1/kol/leaderboard/user-posts-plans:
+ *   get:
+ *     summary: Get all posts plans for a user by Twitter ID
+ *     tags: [User Posts Plans]
+ *     parameters:
+ *       - in: query
+ *         name: twitter_id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Twitter ID of the user
+ *     responses:
+ *       '200':
+ *         description: Returns all posts plans for the user
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/UserPostPlan'
+ *       '400':
+ *         description: Twitter ID is required as a query parameter
+ *       '500':
+ *         description: Server error
+ * 
+ * components:
+ *   schemas:
+ *     UserPostPlan:
+ *       type: object
+ *       properties:
+ *         username:
+ *           type: string
+ *         twitterId:
+ *           type: string
+ *         serviceType:
+ *           type: string
+ *         postsCount:
+ *           type: number
+ *         postsAllowed:
+ *           type: number
+ *         expiryDate:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *           nullable: true
+ *         twitterCommunity:
+ *           type: string
+ */
+kolsLeaderboardRouter.get('/leaderboard/user-posts-plans', freeTrialController.getUserPostsPlans);
+
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config
 // e.g.:
 // components:
