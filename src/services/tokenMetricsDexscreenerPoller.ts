@@ -427,40 +427,42 @@ Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
 
               // 1-hour volume alert
               if (run1HrAlert && volume1h > 0) {
-                const tweetText = `🚀 1-Hour Volume Alert! ${baseTokenSymbol}
+                const formattedVolume = volume1h >= 1000000 
+                  ? `$${(volume1h / 1000000).toFixed(1)}M` 
+                  : `$${(volume1h / 1000).toFixed(0)}k`;
+                  
+                const tweetText = `🎉 1H VOLUME ALERT! 🚀
+` +
+                  `� 1-hour VOL: ${formattedVolume} on $${baseTokenSymbol} 🔥
+` +
+                  `� CA: ${item.contract}
+` +
+                  `📊 [Live Chart](${dexLink})
 
 ` +
-                  `💵 Price: $${priceUsd.toFixed(6)}
-` +
-                  `📊 1h Volume: $${volume1h.toLocaleString()}
-` +
-                  `📈 1h Price Change: ${priceChange1h > 0 ? '🟢' : '🔴'} ${priceChange1h.toFixed(2)}%
-
-` +
-                  `${dexLink}
-` +
-                  `#Solana #${baseTokenSymbol} #Crypto`;
+                  `Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
 
                 logger.info(`[1h Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
                 await this.postToTwitter(tweetText, item.contract, item.chain);
                 alertsPosted++;
               }
 
-              // 1-hour buyer alert (example implementation - adjust based on your criteria)
+              // 1-hour buyer alert
               if (run1HrBuyerAlert && priceChange1h > 0) {
-                const tweetText = `🛍️ 1-Hour Buyer Alert! ${baseTokenSymbol}
+                // Get the number of unique buyers (you'll need to implement this part)
+                // For now, using a placeholder - replace with actual unique buyer count
+                const uniqueBuyers = 0; // TODO: Implement unique buyer count logic
+                
+                const tweetText = `🎉 HOURLY BUYER ALERT! 🚀
+` +
+                  `� 1H: ${uniqueBuyers} Unique Buyers Bought $${baseTokenSymbol} 🔥
+` +
+                  `� CA: ${item.contract}
+` +
+                  `📊 [Live Chart](${dexLink})
 
 ` +
-                  `💰 Price: $${priceUsd.toFixed(6)}
-` +
-                  `📈 1h Price Change: 🟢 +${priceChange1h.toFixed(2)}%
-` +
-                  `💹 24h Volume: $${volume1h.toLocaleString()}
-
-` +
-                  `${dexLink}
-` +
-                  `#Solana #${baseTokenSymbol} #Crypto #BuyingPressure`;
+                  `Auto-posted by @DEXAlerts_io | NFA | DYOR | Community-run`;
 
                 logger.info(`[1h Buyer Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
                 await this.postToTwitter(tweetText, item.contract, item.chain);
