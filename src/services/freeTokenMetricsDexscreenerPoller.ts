@@ -180,7 +180,7 @@ class FreeTokenMetricsDexscreenerPoller {
             })).filter(x => x.contract);
 
             if (items.length === 0) {
-                logger.info('[Free] No active free trial users with valid token addresses found');
+                logger.info('[Free] No active free trial 1 users with valid token addresses found');
                 return;
             }
 
@@ -324,12 +324,72 @@ CA: ${item.contract}
         }
 
         try {
+            // First, check if user can post
+            const checkQuery = `
+            SELECT 
+                twitter_id,
+                total_posts_count,
+                total_posts_allowed
+            FROM user_posts_plans 
+            WHERE service_type = 'freeTrial'
+            AND expire_at > now()
+            LIMIT 1
+        `;
+
+            const checkResult = await questdbService.query(checkQuery);
+
+            if (checkResult.rows.length === 0) {
+                logger.warn(`[Free] No active free trial found for contract: ${contract}`);
+                return null;
+            }
+
+            const [twitterId, currentCount, maxCount] = checkResult.rows[0];
+
+            if (currentCount >= maxCount) {
+                logger.info(`[Free] User ${twitterId} has reached their maximum allowed posts (${currentCount}/${maxCount})`);
+                return null;
+            }
+
             // Post the tweet
             const tweet = await twitterClient.v2.tweet(tweetText);
             logger.info(`[Free] Posted tweet for ${contract} (${chain}): ${tweet.data.text}`);
+
+            // Update the post count
+            const updateQuery = `
+            UPDATE user_posts_plans 
+            SET 
+                total_posts_count = total_posts_count + 1,
+                updated_at = now()
+            WHERE twitter_id = '${twitterId}'
+            AND service_type = 'freeTrial'
+            AND expire_at > now()
+            AND total_posts_count < total_posts_allowed
+        `;
+
+            await questdbService.query(updateQuery);
+
+            // Verify the update
+            const verifyQuery = `
+            SELECT total_posts_count 
+            FROM user_posts_plans 
+            WHERE twitter_id = '${twitterId}'
+            AND service_type = 'freeTrial'
+            LIMIT 1
+        `;
+
+            const verifyResult = await questdbService.query(verifyQuery);
+            if (verifyResult.rows.length > 0) {
+                const newCount = verifyResult.rows[0][0];
+                logger.info(`[Free] Updated post count for user ${twitterId}: ${newCount}/${maxCount} posts used`);
+
+                if (newCount >= maxCount) {
+                    logger.info(`[Free] User ${twitterId} has reached their maximum allowed posts (${newCount}/${maxCount})`);
+                }
+            }
+
             return tweet;
         } catch (error: any) {
-            logger.error(`[Free] Error posting to Twitter: ${error.message}`, {
+            logger.error(`[Free] Error in postToTwitter: ${error.message}`, {
                 error: error.stack,
                 contract,
                 chain
