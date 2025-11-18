@@ -132,53 +132,53 @@ class TokenMetricsDexscreenerPoller {
       let currentExpiresAt = expiresAt;
 
       // Auto-refresh if token expires soon (within 5 minutes)
-      if (expiresAt && new Date(expiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
-        logger.info('getTwitterClient: Access token nearing expiry - attempting auto-refresh');
+      // if (expiresAt && new Date(expiresAt) < new Date(Date.now() + 5 * 60 * 1000)) {
+      //   logger.info('getTwitterClient: Access token nearing expiry - attempting auto-refresh');
 
-        if (!refreshToken) {
-          logger.error('getTwitterClient: No refresh token available for auto-refresh');
-          return null;
-        }
+      //   if (!refreshToken) {
+      //     logger.error('getTwitterClient: No refresh token available for auto-refresh');
+      //     return null;
+      //   }
 
-        try {
-          // Create app client for refresh (requires client_id and client_secret in config)
-          const appClient = new TwitterApi({
-            clientId: config.twitter.clientId,
-            clientSecret: config.twitter.clientSecret,
-          });
+      //   try {
+      //     // Create app client for refresh (requires client_id and client_secret in config)
+      //     const appClient = new TwitterApi({
+      //       clientId: config.twitter.clientId,
+      //       clientSecret: config.twitter.clientSecret,
+      //     });
 
-          const refreshed = await appClient.refreshOAuth2Token(refreshToken);
+      //     const refreshed = await appClient.refreshOAuth2Token(refreshToken);
 
-          currentAccessToken = refreshed.accessToken;
-          currentRefreshToken = refreshed.refreshToken;
-          currentExpiresAt = new Date(Date.now() + (refreshed.expiresIn || 7200) * 1000).toISOString();
+      //     currentAccessToken = refreshed.accessToken;
+      //     currentRefreshToken = refreshed.refreshToken;
+      //     currentExpiresAt = new Date(Date.now() + (refreshed.expiresIn || 7200) * 1000).toISOString();
 
-          // Update DB with new tokens
-          const updateQuery = `
-            UPDATE twitter_auth 
-            SET 
-              access_token = '${currentAccessToken}', 
-              refresh_token = '${currentRefreshToken}', 
-              expires_at = '${currentExpiresAt}',
-              updated_at = now()
-            WHERE id = '${userId}';
-          `;
-          await questdbService.query(updateQuery);
+      //     // Update DB with new tokens
+      //     const updateQuery = `
+      //       UPDATE twitter_auth 
+      //       SET 
+      //         access_token = '${currentAccessToken}', 
+      //         refresh_token = '${currentRefreshToken}', 
+      //         expires_at = '${currentExpiresAt}',
+      //         updated_at = now()
+      //       WHERE id = '${userId}';
+      //     `;
+      //     await questdbService.query(updateQuery);
 
-          logger.info('getTwitterClient: Successfully refreshed tokens and updated DB', {
-            username,
-            newExpiresAt: currentExpiresAt,
-            newTokenPrefix: `${currentAccessToken.substring(0, 10)}...`
-          });
-        } catch (refreshError: any) {
-          logger.error('getTwitterClient: Auto-refresh failed', {
-            error: refreshError.message,
-            code: refreshError.code,
-            status: refreshError.status
-          });
-          // Fall back to original token (might fail verification next)
-        }
-      }
+      //     logger.info('getTwitterClient: Successfully refreshed tokens and updated DB', {
+      //       username,
+      //       newExpiresAt: currentExpiresAt,
+      //       newTokenPrefix: `${currentAccessToken.substring(0, 10)}...`
+      //     });
+      //   } catch (refreshError: any) {
+      //     logger.error('getTwitterClient: Auto-refresh failed', {
+      //       error: refreshError.message,
+      //       code: refreshError.code,
+      //       status: refreshError.status
+      //     });
+      //     // Fall back to original token (might fail verification next)
+      //   }
+      // }
 
       // Create a new Twitter client with the (potentially refreshed) access token
       logger.debug('getTwitterClient: Creating Twitter client with access token');
@@ -224,22 +224,56 @@ class TokenMetricsDexscreenerPoller {
     }
   }
 
-  private async postToTwitter(message: string): Promise<boolean> {
+  private async postToTwitter(message: string, contract: string, chain: string): Promise<boolean> {
     try {
-      const client = await this.getTwitterClient();
-      if (!client) {
-        logger.error('Could not create Twitter client - no valid access token found');
-        return false;
-      }
+      // First, check if we've reached the post limit for this contract
+      const checkQuery = `
+            SELECT twitter_id, total_posts_count, total_posts_allowed 
+            FROM user_posts_plans 
+            WHERE LOWER(token) = LOWER('${contract.replace(/'/g, "''")}')
+            AND expire_at > now()
+            ORDER BY created_at DESC
+            LIMIT 1`;
 
-      const truncatedMessage = message.length > 280 ? message.substring(0, 277) + '...' : message;
-      const tweet = await client.v2.tweet(truncatedMessage);
+      const result = await questdbService.query(checkQuery);
 
-      if (tweet) {
-        logger.info(`Posted to Twitter: ${truncatedMessage}`);
-        return true;
+      if (result.rows.length > 0) {
+        const [twitter_id, currentCount, allowedCount] = result.rows[0];
+        if (currentCount >= allowedCount) {
+          logger.info(`Post limit reached for ${contract} (${currentCount}/${allowedCount} posts)`);
+          return false;
+        }
+
+        // Get Twitter client and post the tweet
+        const client = await this.getTwitterClient();
+        if (!client) {
+          logger.error('Could not create Twitter client - no valid access token found');
+          return false;
+        }
+
+        const truncatedMessage = message.length > 280 ? message.substring(0, 277) + '...' : message;
+        const tweet = await client.v2.tweet(truncatedMessage);
+
+        if (tweet) {
+          // Update the post count in user_posts_plans
+          const updateQuery = `
+                    UPDATE user_posts_plans 
+                    SET total_posts_count = COALESCE(total_posts_count, 0) + 1,
+                        updated_at = now()
+                    WHERE twitter_id = '${twitter_id}'`;
+
+          await questdbService.query(updateQuery).catch(err =>
+            logger.error(`Failed to update post count for ${contract}:`, err)
+          );
+
+          logger.info(`Posted to Twitter (${contract}): ${truncatedMessage}`);
+          return true;
+        } else {
+          logger.error('Failed to post to Twitter: No response from API');
+          return false;
+        }
       } else {
-        logger.error('Failed to post to Twitter: No response from API');
+        logger.info(`No active plan found for ${contract} (${chain}) - skipping post`);
         return false;
       }
     } catch (error) {
@@ -351,22 +385,15 @@ class TokenMetricsDexscreenerPoller {
 
               // 5-minute volume alert
               if (run5MinAlert && volume5m > 0) {
-                const tweetText = `📈 5-Min Volume Alert! ${baseTokenSymbol}
+                const tweetText = `🎉 5MIN VOLUME ALERT! �
+💸 5-min buy VOL: $${(volume5m / 1000).toFixed(0)}k on $${baseTokenSymbol} 🔥
+� CA: ${item.contract}
+� [Live Chart](${dexLink})
 
-` +
-                  `💵 Price: $${priceUsd.toFixed(6)}
-` +
-                  `📊 5m Volume: $${volume5m.toLocaleString()}
-` +
-                  `📈 5m Price Change: ${priceChange5m > 0 ? '🟢' : '🔴'} ${priceChange5m.toFixed(2)}%
-
-` +
-                  `${dexLink}
-` +
-                  `#Solana #${baseTokenSymbol} #Crypto`;
+Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
 
                 logger.info(`[5min Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
-                await this.postToTwitter(tweetText);
+                await this.postToTwitter(tweetText, item.contract, item.chain);
                 alertsPosted++;
               }
 
@@ -387,7 +414,7 @@ class TokenMetricsDexscreenerPoller {
                   `#Solana #${baseTokenSymbol} #Crypto`;
 
                 logger.info(`[1h Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
-                await this.postToTwitter(tweetText);
+                await this.postToTwitter(tweetText, item.contract, item.chain);
                 alertsPosted++;
               }
 
@@ -408,7 +435,7 @@ class TokenMetricsDexscreenerPoller {
                   `#Solana #${baseTokenSymbol} #Crypto #BuyingPressure`;
 
                 logger.info(`[1h Buyer Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
-                await this.postToTwitter(tweetText);
+                await this.postToTwitter(tweetText, item.contract, item.chain);
                 alertsPosted++;
               }
 
@@ -457,24 +484,24 @@ class TokenMetricsDexscreenerPoller {
                 const checkQuery = `SELECT 1 FROM token_metrics WHERE contract = '${safeContract}' AND chain = '${safeChain}' LIMIT 1;`;
 
                 try {
-                    // Check if record exists
-                    const exists = (await questdbService.query(checkQuery)).rows.length > 0;
-                    
-                    if (exists) {
-                        // Update existing record
-                        await questdbService.query(updateQuery);
-                        logger.debug(`[DB] Updated record for ${item.contract} (${item.chain})`);
-                    } else {
-                        // Insert new record
-                        await questdbService.query(insertQuery);
-                        logger.debug(`[DB] Inserted new record for ${item.contract} (${item.chain})`);
-                    }
+                  // Check if record exists
+                  const exists = (await questdbService.query(checkQuery)).rows.length > 0;
+
+                  if (exists) {
+                    // Update existing record
+                    await questdbService.query(updateQuery);
+                    logger.debug(`[DB] Updated record for ${item.contract} (${item.chain})`);
+                  } else {
+                    // Insert new record
+                    await questdbService.query(insertQuery);
+                    logger.debug(`[DB] Inserted new record for ${item.contract} (${item.chain})`);
+                  }
                 } catch (error: any) {
-                    // Fallback to insert if update fails
-                    await questdbService.query(insertQuery).catch(err => 
-                        logger.error(`[DB] Failed to insert record for ${item.contract}:`, err)
-                    );
-                    logger.debug(`[DB] Inserted new record after error for ${item.contract}`);
+                  // Fallback to insert if update fails
+                  await questdbService.query(insertQuery).catch(err =>
+                    logger.error(`[DB] Failed to insert record for ${item.contract}:`, err)
+                  );
+                  logger.debug(`[DB] Inserted new record after error for ${item.contract}`);
                 }
               } catch (error) {
                 logger.error(`[DB] Failed to update token_metrics for ${item.contract} (${item.chain}):`, error);

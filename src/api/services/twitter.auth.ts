@@ -38,7 +38,13 @@ export const handleTwitterExchange = async (req: Request, res: Response, next: N
         const result = await twitterService.handleLoginCallback(code, codeVerifier, state, finalRedirectUri);
         logger.debug('handleTwitterExchange: Token exchange successful, username:', result.username);
 
-        res.json(result);
+        // Include refreshToken in the response if available
+        const response = {
+            ...result,
+            // Don't expose the refresh token in the response for security
+            refreshToken: undefined
+        };
+        res.json(response);
         logger.debug('handleTwitterExchange: Response sent successfully');
     } catch (error: any) {
         logger.error('handleTwitterExchange: Error exchanging Twitter code:', error);
@@ -75,6 +81,7 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
 
         // Redirect to client dashboard with success
+        // Note: We don't include the refresh token in the URL for security
         const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}&userId=${result.userId}`;
         logger.debug('handleTwitterCallback: Redirecting to client URL:', clientUrl);
         res.redirect(clientUrl);
