@@ -24,7 +24,7 @@ class TokenMetricsDexscreenerPoller {
 
     // 5-minute alert job (runs every 6 minutes at :00, :06, :12, etc.)
     this.fiveMinJob = new CronJob(
-      '0 */6 * * * *',  // Every 6 minutes at :00 seconds
+      '0 */1 * * * *',  // Every 6 minutes at :00 seconds
       async () => {
         logger.info('[Scheduler] Starting 5-minute alert cycle');
         await this.fetchTokenDexInfo('5min');
@@ -251,7 +251,7 @@ class TokenMetricsDexscreenerPoller {
 
   private async fetchTokenDexInfo(alertType: '5min' | '1h' | '1h_buyer') {
     if (!this.running) return;
-    
+
     const run5MinAlert = alertType === '5min';
     const run1HrAlert = alertType === '1h';
     const run1HrBuyerAlert = alertType === '1h_buyer';
@@ -265,7 +265,7 @@ class TokenMetricsDexscreenerPoller {
          AND expire_at > now() 
          ORDER BY created_at DESC;`
       );
-      
+
       const contractIdx = res.columns.indexOf('contract');
       const chainIdx = res.columns.indexOf('chain');
       const items = res.rows.map(r => ({
@@ -313,15 +313,15 @@ class TokenMetricsDexscreenerPoller {
             if (batch.includes(item.contract)) {
               const key = `${item.contract}:${item.chain}`;
               const relevantPairs = pairsByContractChain.get(key) || [];
-              
+
               logger.debug(`[Dexscreener] Processing token ${item.contract} on chain ${item.chain} - Found ${relevantPairs.length} trading pairs`);
-              
+
               if (relevantPairs.length === 0) {
                 logger.warn(`[Dexscreener] No trading pairs found for contract ${item.contract} on chain ${item.chain} - skipping update`);
                 // Log the actual API response for debugging
                 const allPairs = Array.from(pairsByContractChain.entries())
                   .filter(([k]) => k.startsWith(`${item.contract}:`));
-                logger.debug(`[Dexscreener] Available pairs for token ${item.contract} across all chains:`, 
+                logger.debug(`[Dexscreener] Available pairs for token ${item.contract} across all chains:`,
                   allPairs.map(([k, v]) => ({ chain: k.split(':')[1], pairs: v.length })));
                 continue;
               }
@@ -333,77 +333,80 @@ class TokenMetricsDexscreenerPoller {
                 logger.debug(`[Dexscreener] Comparing pairs - Current: ${curr.baseToken?.symbol || 'unknown'} ($${currLiquidity}) vs Previous: ${prev.baseToken?.symbol || 'unknown'} ($${prevLiquidity})`);
                 return currLiquidity > prevLiquidity ? curr : prev;
               });
-              
+
               logger.info(`[Dexscreener] Selected pair for ${item.contract}: ${selectedPair.baseToken?.symbol || 'unknown'} with $${selectedPair.liquidity?.usd || 0} liquidity`);
 
               const baseTokenSymbol = selectedPair.baseToken?.symbol || 'UNKNOWN';
               const priceUsd = selectedPair.priceUsd != null ? Number(selectedPair.priceUsd) : 0;
               const volume5m = selectedPair.volume?.m5 != null ? Number(selectedPair.volume.m5) : 0;
               const volume1h = selectedPair.volume?.h1 != null ? Number(selectedPair.volume.h1) : 0;
+              const volume24h = selectedPair.volume?.h24 != null ? Number(selectedPair.volume.h24) : 0;
               const priceChange5m = selectedPair.priceChange?.m5 != null ? Number(selectedPair.priceChange.m5) : 0;
               const priceChange1h = selectedPair.priceChange?.h1 != null ? Number(selectedPair.priceChange.h1) : 0;
+              const fdv = selectedPair.fdv != null ? Number(selectedPair.fdv) : 0;
+              const marketCap = selectedPair.marketCap != null ? Number(selectedPair.marketCap) : 0;
 
               // Prepare alert messages based on alert types
               const dexLink = `https://dexscreener.com/solana/${item.contract}`;
-              
+
               // 5-minute volume alert
               if (run5MinAlert && volume5m > 0) {
                 const tweetText = `📈 5-Min Volume Alert! ${baseTokenSymbol}
 
 ` +
-                `💵 Price: $${priceUsd.toFixed(6)}
+                  `💵 Price: $${priceUsd.toFixed(6)}
 ` +
-                `📊 5m Volume: $${volume5m.toLocaleString()}
+                  `📊 5m Volume: $${volume5m.toLocaleString()}
 ` +
-                `📈 5m Price Change: ${priceChange5m > 0 ? '🟢' : '🔴'} ${priceChange5m.toFixed(2)}%
+                  `📈 5m Price Change: ${priceChange5m > 0 ? '🟢' : '🔴'} ${priceChange5m.toFixed(2)}%
 
 ` +
-                `${dexLink}
+                  `${dexLink}
 ` +
-                `#Solana #${baseTokenSymbol} #Crypto`;
-                
+                  `#Solana #${baseTokenSymbol} #Crypto`;
+
                 logger.info(`[5min Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
                 await this.postToTwitter(tweetText);
                 alertsPosted++;
               }
-              
+
               // 1-hour volume alert
               if (run1HrAlert && volume1h > 0) {
                 const tweetText = `🚀 1-Hour Volume Alert! ${baseTokenSymbol}
 
 ` +
-                `💵 Price: $${priceUsd.toFixed(6)}
+                  `💵 Price: $${priceUsd.toFixed(6)}
 ` +
-                `📊 1h Volume: $${volume1h.toLocaleString()}
+                  `📊 1h Volume: $${volume1h.toLocaleString()}
 ` +
-                `📈 1h Price Change: ${priceChange1h > 0 ? '🟢' : '🔴'} ${priceChange1h.toFixed(2)}%
+                  `📈 1h Price Change: ${priceChange1h > 0 ? '🟢' : '🔴'} ${priceChange1h.toFixed(2)}%
 
 ` +
-                `${dexLink}
+                  `${dexLink}
 ` +
-                `#Solana #${baseTokenSymbol} #Crypto`;
-                
+                  `#Solana #${baseTokenSymbol} #Crypto`;
+
                 logger.info(`[1h Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
                 await this.postToTwitter(tweetText);
                 alertsPosted++;
               }
-              
+
               // 1-hour buyer alert (example implementation - adjust based on your criteria)
               if (run1HrBuyerAlert && priceChange1h > 0) {
                 const tweetText = `🛍️ 1-Hour Buyer Alert! ${baseTokenSymbol}
 
 ` +
-                `💰 Price: $${priceUsd.toFixed(6)}
+                  `💰 Price: $${priceUsd.toFixed(6)}
 ` +
-                `📈 1h Price Change: 🟢 +${priceChange1h.toFixed(2)}%
+                  `📈 1h Price Change: 🟢 +${priceChange1h.toFixed(2)}%
 ` +
-                `💹 24h Volume: $${volume1h.toLocaleString()}
+                  `💹 24h Volume: $${volume1h.toLocaleString()}
 
 ` +
-                `${dexLink}
+                  `${dexLink}
 ` +
-                `#Solana #${baseTokenSymbol} #Crypto #BuyingPressure`;
-                
+                  `#Solana #${baseTokenSymbol} #Crypto #BuyingPressure`;
+
                 logger.info(`[1h Buyer Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
                 await this.postToTwitter(tweetText);
                 alertsPosted++;
@@ -416,28 +419,63 @@ class TokenMetricsDexscreenerPoller {
 
               // Update token_metrics with the latest data
               try {
-                await questdbService.query(`
-                  INSERT INTO token_metrics 
-                  (contract, chain, price_usd, volume_5m, volume_1h, price_change_5m, price_change_1h, updated_at)
-                  VALUES (
-                    '${item.contract}', 
-                    '${item.chain}', 
-                    ${priceUsd}, 
-                    ${volume5m}, 
-                    ${volume1h}, 
-                    ${priceChange5m}, 
-                    ${priceChange1h}, 
-                    now()
-                  )
-                  ON CONFLICT(contract, chain) DO UPDATE SET 
-                    price_usd = EXCLUDED.price_usd,
-                    volume_5m = EXCLUDED.volume_5m,
-                    volume_1h = EXCLUDED.volume_1h,
-                    price_change_5m = EXCLUDED.price_change_5m,
-                    price_change_1h = EXCLUDED.price_change_1h,
-                    updated_at = EXCLUDED.updated_at;
-                `);
-                logger.debug(`[DB] Updated token_metrics for ${item.contract} (${item.chain})`);
+                // Ensure baseTokenSymbol is a string and properly escaped
+                const safeSymbol = String(baseTokenSymbol || 'UNKNOWN').replace(/'/g, "''");
+                const safeContract = String(item.contract).replace(/'/g, "''");
+                const safeChain = String(item.chain).replace(/'/g, "''");
+
+                // First, attempt to update existing record (without updating timestamp)
+                const updateQuery = `
+  UPDATE token_metrics
+  SET 
+    chain = '${safeChain}',
+    price_usd = ${priceUsd || 0},
+    volume_5m = ${volume5m || 0},
+    volume_1h = ${volume1h || 0},
+    volume_24h = ${volume24h || 0},
+    fdv = ${fdv || 0},
+    market_cap = ${marketCap || 0}
+  WHERE contract = '${safeContract}';`;
+
+                // Then, insert if no rows were updated
+                const insertQuery = `
+  INSERT INTO token_metrics
+  (contract, chain, price_usd, volume_5m, volume_1h, volume_24h, fdv, market_cap, timestamp)
+  VALUES (
+    '${safeContract}',
+    '${safeChain}',
+    ${priceUsd || 0},
+    ${volume5m || 0},
+    ${volume1h || 0},
+    ${volume24h || 0},
+    ${fdv || 0},
+    ${marketCap || 0},
+    now()
+  );`;
+
+                // First, check if record exists
+                const checkQuery = `SELECT 1 FROM token_metrics WHERE contract = '${safeContract}' AND chain = '${safeChain}' LIMIT 1;`;
+
+                try {
+                    // Check if record exists
+                    const exists = (await questdbService.query(checkQuery)).rows.length > 0;
+                    
+                    if (exists) {
+                        // Update existing record
+                        await questdbService.query(updateQuery);
+                        logger.debug(`[DB] Updated record for ${item.contract} (${item.chain})`);
+                    } else {
+                        // Insert new record
+                        await questdbService.query(insertQuery);
+                        logger.debug(`[DB] Inserted new record for ${item.contract} (${item.chain})`);
+                    }
+                } catch (error: any) {
+                    // Fallback to insert if update fails
+                    await questdbService.query(insertQuery).catch(err => 
+                        logger.error(`[DB] Failed to insert record for ${item.contract}:`, err)
+                    );
+                    logger.debug(`[DB] Inserted new record after error for ${item.contract}`);
+                }
               } catch (error) {
                 logger.error(`[DB] Failed to update token_metrics for ${item.contract} (${item.chain}):`, error);
               }
