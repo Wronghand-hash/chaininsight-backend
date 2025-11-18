@@ -252,6 +252,115 @@ class TokenMetricsDexscreenerPoller {
     }
   }
 
+  private extractCommunityId(communityLink: string): string | null {
+    try {
+      // Handle different community link formats
+      // Format 1: https://twitter.com/i/communities/1234567890123456789
+      // Format 2: https://x.com/i/communities/1234567890123456789
+      // Format 3: https://twitter.com/i/communities/1234567890123456789/settings
+      const match = communityLink.match(/[\/](?:communities|i\/communities)[\/](\d+)/);
+      if (match && match[1]) {
+        return match[1];
+      }
+
+      // If the link is just a community ID
+      if (/^\d+$/.test(communityLink)) {
+        return communityLink;
+      }
+
+      logger.warn('Could not extract community ID from link:', communityLink);
+      return null;
+    } catch (error) {
+      logger.error('Error extracting community ID:', error);
+      return null;
+    }
+  }
+  async postToCommunity(tweetText: string, communityLinkOrId: string): Promise<boolean> {
+    const client = await this.getTwitterClient();
+    if (!client) {
+      logger.error('Failed to get Twitter client');
+      return false;
+    }
+
+    // Extract community ID from the provided link or ID
+    const communityId = this.extractCommunityId(communityLinkOrId);
+    if (!communityId) {
+      logger.error('Invalid community link or ID:', communityLinkOrId);
+      return false;
+    }
+
+    try {
+      // First verify the user is an admin of the community
+      const isAdmin = await this.isCommunityAdmin(client, communityId);
+      if (!isAdmin) {
+        logger.error('User is not an admin of the community');
+        return false;
+      }
+
+      // Post the tweet directly to the community
+      const tweet = await client.v2.tweet({
+        text: tweetText,
+        community_id: communityId
+      });
+
+      logger.info('Successfully posted to community', {
+        tweetId: tweet.data.id,
+        communityId
+      });
+      return true;
+    } catch (error: any) {
+      logger.error('Failed to post to community:', {
+        error: error.message,
+        code: error.code,
+        status: error.status,
+        communityId
+      });
+      return false;
+    }
+  }
+
+  private async isCommunityAdmin(client: TwitterApi, communityLinkOrId: string): Promise<boolean> {
+    try {
+      // Extract community ID from the provided link or ID
+      const communityId = this.extractCommunityId(communityLinkOrId);
+      if (!communityId) {
+        logger.error('Invalid community link or ID:', communityLinkOrId);
+        return false;
+      }
+
+      logger.debug(`Checking if user is admin of community ${communityId}`);
+
+      // Get the current user
+      const currentUser = await client.v2.me();
+      const currentUserId = currentUser.data.id;
+
+      // Use the direct API endpoint to get community moderators
+      const response = await client.get('communities/moderators', {
+        community_id: communityId,
+        'user.fields': 'id,username'
+      });
+
+      // Check if current user is in the moderators list
+      const isAdmin = response.data?.data?.some(
+        (moderator: any) => moderator.id === currentUserId
+      );
+
+      if (!isAdmin) {
+        logger.warn(`User is not an admin of community ${communityId}`);
+        return false;
+      }
+
+      return true;
+    } catch (error: any) {
+      logger.error('Error checking community admin status:', {
+        error: error.message,
+        code: error.code,
+        status: error.status
+      });
+      return false;
+    }
+  }
+
   private async postToTwitter(message: string, contract: string, chain: string): Promise<boolean> {
     try {
       // First, check if we've reached the post limit for this contract

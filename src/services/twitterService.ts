@@ -74,7 +74,7 @@ class TwitterService {
         }
     }
 
-    async generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read', 'tweet.read']): Promise<{ url: string; state: string; codeVerifier: string; codeChallenge: string }> {
+    async generateLoginUrl(redirectUri: string, scopes: string[] = ['users.read', 'community.read', 'tweet.read']): Promise<{ url: string; state: string; codeVerifier: string; codeChallenge: string }> {
         logger.debug('generateLoginUrl: Using redirectUri:', redirectUri, 'scopes:', scopes);
         if (!config.twitter?.clientId) {
             logger.error('generateLoginUrl: Twitter clientId is required for OAuth2 login');
