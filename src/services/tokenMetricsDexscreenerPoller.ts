@@ -24,7 +24,7 @@ class TokenMetricsDexscreenerPoller {
 
     // 5-minute alert job (runs every 6 minutes at :00, :06, :12, etc.)
     this.fiveMinJob = new CronJob(
-      '0 */1 * * * *',  // Every 6 minutes at :00 seconds
+      '0 */6 * * * *',  // Every 6 minutes at :00 seconds
       async () => {
         logger.info('[Scheduler] Starting 5-minute alert cycle');
         await this.fetchTokenDexInfo('5min');
@@ -46,9 +46,9 @@ class TokenMetricsDexscreenerPoller {
       'UTC'
     );
 
-    // 1-hour buyer alert job (runs at :30 every hour)
+    // 1-hour buyer alert job (runs at :00 every hour)
     this.oneHourBuyerJob = new CronJob(
-      '0 30 * * * *',  // At :30 of every hour
+      '0 0 * * * *',  // At the start of every hour
       async () => {
         logger.info('[Scheduler] Starting 1-hour buyer alert cycle');
         await this.fetchTokenDexInfo('1h_buyer');
@@ -392,7 +392,6 @@ class TokenMetricsDexscreenerPoller {
               const selectedPair = relevantPairs.reduce((prev, curr) => {
                 const prevLiquidity = prev.liquidity?.usd || 0;
                 const currLiquidity = curr.liquidity?.usd || 0;
-                logger.debug(`[Dexscreener] Comparing pairs - Current: ${curr.baseToken?.symbol || 'unknown'} ($${currLiquidity}) vs Previous: ${prev.baseToken?.symbol || 'unknown'} ($${prevLiquidity})`);
                 return currLiquidity > prevLiquidity ? curr : prev;
               });
 
@@ -427,10 +426,10 @@ Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
 
               // 1-hour volume alert
               if (run1HrAlert && volume1h > 0) {
-                const formattedVolume = volume1h >= 1000000 
-                  ? `$${(volume1h / 1000000).toFixed(1)}M` 
+                const formattedVolume = volume1h >= 1000000
+                  ? `$${(volume1h / 1000000).toFixed(1)}M`
                   : `$${(volume1h / 1000).toFixed(0)}k`;
-                  
+
                 const tweetText = `🎉 1H VOLUME ALERT! 🚀
 ` +
                   `� 1-hour VOL: ${formattedVolume} on $${baseTokenSymbol} 🔥
@@ -452,7 +451,7 @@ Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
                 // Get the number of unique buyers (you'll need to implement this part)
                 // For now, using a placeholder - replace with actual unique buyer count
                 const uniqueBuyers = 0; // TODO: Implement unique buyer count logic
-                
+
                 const tweetText = `🎉 HOURLY BUYER ALERT! 🚀
 ` +
                   `� 1H: ${uniqueBuyers} Unique Buyers Bought $${baseTokenSymbol} 🔥
