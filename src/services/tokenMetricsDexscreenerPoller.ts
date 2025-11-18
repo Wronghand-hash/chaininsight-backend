@@ -447,25 +447,37 @@ Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
               }
 
               // 1-hour buyer alert
-              if (run1HrBuyerAlert && priceChange1h > 0) {
-                // Get the number of unique buyers (you'll need to implement this part)
-                // For now, using a placeholder - replace with actual unique buyer count
-                const uniqueBuyers = 0; // TODO: Implement unique buyer count logic
+              if (run1HrBuyerAlert) {
+                // Extract transaction data with null checks
+                const txns = selectedPair.txns || {};
+                const h1 = (txns as any)?.h1 || {};
+                const m5 = (txns as any)?.m5 || {};
 
-                const tweetText = `🎉 HOURLY BUYER ALERT! 🚀
-` +
-                  `� 1H: ${uniqueBuyers} Unique Buyers Bought $${baseTokenSymbol} 🔥
-` +
-                  `� CA: ${item.contract}
-` +
-                  `📊 [Live Chart](${dexLink})
+                const buyerCount = h1.buys || 0;
+                const sellerCount = h1.sells || 0;
 
-` +
-                  `Auto-posted by @DEXAlerts_io | NFA | DYOR | Community-run`;
+                logger.info(`[${baseTokenSymbol}] Transaction data - 1h: ${JSON.stringify(h1)}, 5m: ${JSON.stringify(m5)}`);
 
-                logger.info(`[1h Buyer Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
-                await this.postToTwitter(tweetText, item.contract, item.chain);
-                alertsPosted++;
+                // Minimum number of buyers required to trigger an alert
+                const minBuyersThreshold = 1;
+
+                if (buyerCount >= minBuyersThreshold) {
+                  const priceChangeText = priceChange1h > 0 ? `+${priceChange1h.toFixed(2)}% 📈` :
+                    priceChange1h < 0 ? `${priceChange1h.toFixed(2)}% 📉` : '0% ➖';
+
+                  logger.info(`[${baseTokenSymbol}] Buyers: ${buyerCount}, Sellers: ${sellerCount} in the last hour`);
+
+                  const tweetText = `🎉 HOURLY BUYER ALERT! 🚀
+💸 1H: ${buyerCount} Unique Buyers Bought $${baseTokenSymbol} 🔥
+🔗 CA: ${item.contract}
+📊 [Live Chart](${dexLink})
+
+Auto-posted by @DEXAlerts_io | NFA | DYOR | Community-run`;
+
+                  logger.info(`[1h Buyer Alert] Posting for ${baseTokenSymbol}: ${tweetText}`);
+                  await this.postToTwitter(tweetText, item.contract, item.chain);
+                  alertsPosted++;
+                }
               }
 
               // Log the data for this token
