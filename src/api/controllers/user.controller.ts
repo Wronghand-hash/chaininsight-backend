@@ -27,50 +27,85 @@ export const googleAuthInit = (req: Request, res: Response) => {
 export const googleAuthCallback = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { code } = req.query;
-        logger.info('Google OAuth callback received', {
+        const clientIp = req.ip || req.socket.remoteAddress || '';
+
+        logger.info('Google OAuth callback received', { 
             code: code ? 'received' : 'missing',
+            clientIp,
             queryParams: Object.keys(req.query)
         });
 
         if (!code || typeof code !== 'string') {
-            logger.error('Missing or invalid authorization code', { code });
+            logger.error('Missing or invalid authorization code', { code, clientIp });
             return res.status(400).json({ error: 'Authorization code is required' });
         }
 
         // Exchange code for tokens
-        logger.info('Exchanging authorization code for tokens...');
+        logger.info('Exchanging authorization code for tokens...', { clientIp });
         const tokens = await usersService.getGoogleTokens(code);
-        logger.info('Successfully obtained tokens', {
-            access_token: tokens.access_token ? 'present' : 'missing',
-            refresh_token: tokens.refresh_token ? 'present' : 'missing',
-            expires_in: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'unknown'
+        logger.info('Successfully obtained tokens', { 
+            clientIp,
+            hasAccessToken: !!tokens.access_token,
+            hasRefreshToken: !!tokens.refresh_token,
+            expiresAt: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'unknown',
+            tokenScope: tokens.scope || 'default',
+            tokenType: tokens.token_type || 'Bearer'
         });
 
         // Get user info from Google
-        logger.info('Fetching user info from Google...');
+        logger.info('Fetching user info from Google...', { clientIp });
         const userInfoResponse = await usersService.getGoogleUserInfo(tokens);
         const userInfo = userInfoResponse.data as GoogleUserInfo;
-        logger.info('Received user info from Google', {
-            user_id: userInfo.sub,
-            email: userInfo.email,
-            email_verified: userInfo.email_verified,
-            name: userInfo.name ? 'present' : 'missing',
-            picture: userInfo.picture ? 'present' : 'missing'
-        });
 
-        // Find or create user
-        logger.info('Finding or creating user in database...');
-        const user = await usersService.findOrCreateGoogleUser({
+        // Log additional user info for debugging
+        const userInfoLog = {
+            userId: userInfo.sub,
+            email: userInfo.email,
+            emailVerified: userInfo.email_verified,
+            name: userInfo.name ? 'present' : 'missing',
+            picture: userInfo.picture ? 'present' : 'missing',
+            locale: userInfo.locale || 'not provided',
+            hd: userInfo.hd || 'not provided',
+            clientIp
+        };
+
+        logger.info('Received user info from Google', userInfoLog);
+
+        // Prepare user data with all available information
+        const userData = {
             sub: userInfo.sub,
             email: userInfo.email,
             name: userInfo.name,
-            picture: userInfo.picture
-        });
-        logger.info('User processed successfully', {
-            user_id: user?.google_id,
+            picture: userInfo.picture,
+            locale: userInfo.locale,
+            hd: userInfo.hd,
+            email_verified: userInfo.email_verified,
+            // Authentication data
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+            last_login_at: new Date().toISOString(),
+            current_sign_in_ip: clientIp,
+            // These will be updated in the service
+            auth_provider: 'google',
+            verified: userInfo.email_verified || false
+        };
+
+        // Find or create user
+        logger.info('Finding or creating user in database...', { email: userInfo.email, clientIp });
+        const user = await usersService.findOrCreateGoogleUser(userData);
+
+        // Log user processing result
+        const userLogData = {
+            userId: user?.google_id,
             email: user?.email,
-            is_new_user: !user?.created_at || (Date.now() - new Date(user.created_at).getTime() < 5000)
-        });
+            isNewUser: !user?.created_at || (Date.now() - new Date(user.created_at).getTime() < 5000),
+            loginCount: user?.login_count,
+            lastLogin: user?.last_login_at,
+            clientIp
+        };
+
+        logger.info('User processed successfully', userLogData);
 
         // Prepare response
         const response = {
@@ -80,7 +115,12 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
                 email: user?.email,
                 name: user?.name,
                 picture: user?.picture,
-                verified: user?.verified
+                verified: user?.verified,
+                email_verified: user?.email_verified,
+                locale: user?.locale,
+                auth_provider: user?.auth_provider,
+                login_count: user?.login_count,
+                last_login: user?.last_login_at
             },
             // In production, you would return a secure token instead
             // token: generateJwtToken(user)

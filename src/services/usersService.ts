@@ -9,6 +9,10 @@ export interface GoogleUserInfo {
     name?: string;
     picture?: string;
     email_verified?: boolean;
+    locale?: string;
+    hd?: string;  // The hosted domain of the user's G Suite account
+    given_name?: string;
+    family_name?: string;
 }
 
 // Initialize OAuth2 client with credentials
@@ -40,6 +44,19 @@ export interface User {
     google_id?: string;
     name?: string;
     picture?: string;
+    access_token?: string;
+    refresh_token?: string;
+    token_expiry?: string;
+    last_login_at?: string;
+    login_count?: number;
+    locale?: string;
+    hd?: string;
+    auth_provider?: string;
+    current_sign_in_ip?: string;
+    last_sign_in_ip?: string;
+    sign_in_count?: number;
+    tos_accepted_at?: string;
+    email_verified?: boolean;
 }
 
 export class UsersService {
@@ -68,7 +85,6 @@ export class UsersService {
         }
     }
 
-    // Get user info from Google
     // Get user info from Google
     async getGoogleUserInfo(tokens: any) {
         try {
@@ -169,7 +185,20 @@ export class UsersService {
             twitter_addresses: JSON.parse(row[5] || '[]'),
             google_id: row[6],
             name: row[7],
-            picture: row[8]
+            picture: row[8],
+            access_token: row[9],
+            refresh_token: row[10],
+            token_expiry: row[11],
+            last_login_at: row[12],
+            login_count: row[13] ? Number(row[13]) : 0,
+            locale: row[14],
+            hd: row[15],
+            auth_provider: row[16] || 'google',
+            current_sign_in_ip: row[17],
+            last_sign_in_ip: row[18],
+            sign_in_count: row[19] ? Number(row[19]) : 0,
+            tos_accepted_at: row[20],
+            email_verified: Boolean(row[21])
         };
     }
 
@@ -185,7 +214,20 @@ export class UsersService {
                 twitter_addresses: userData.twitter_addresses || [],
                 google_id: userData.google_id || null,
                 name: userData.name || null,
-                picture: userData.picture || null
+                picture: userData.picture || null,
+                access_token: userData.access_token || null,
+                refresh_token: userData.refresh_token || null,
+                token_expiry: userData.token_expiry || null,
+                last_login_at: userData.last_login_at || nowIso,
+                login_count: userData.login_count || 1,
+                locale: userData.locale || null,
+                hd: userData.hd || null,
+                auth_provider: userData.auth_provider || 'google',
+                current_sign_in_ip: userData.current_sign_in_ip || null,
+                last_sign_in_ip: userData.last_sign_in_ip || userData.current_sign_in_ip || null,
+                sign_in_count: userData.sign_in_count || 1,
+                tos_accepted_at: userData.tos_accepted_at || nowIso,
+                email_verified: userData.email_verified || false
             };
 
             await questdbService.insertBatch('users', [row]);

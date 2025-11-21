@@ -92,10 +92,29 @@ export class QuestDBService {
         email SYMBOL,
         verified BOOLEAN,
         updated_at TIMESTAMP,
-        twitter_addresses STRING
+        twitter_addresses STRING,
+        google_id STRING,
+        name STRING,
+        picture STRING,
+        access_token STRING,
+        refresh_token STRING,
+        token_expiry TIMESTAMP,
+        last_login_at TIMESTAMP,
+        login_count LONG,
+        locale STRING,
+        hd STRING,
+        auth_provider STRING,
+        current_sign_in_ip STRING,
+        last_sign_in_ip STRING,
+        sign_in_count LONG,
+        tos_accepted_at TIMESTAMP,
+        email_verified BOOLEAN
       ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`;
     await this.pgClient.query(usersCreateSql);
     logger.debug(`✅ Table created: users`);
+    
+    // Ensure all columns exist in the users table
+    await this.ensureUsersTableColumns();
 
     // Other tables
     const tables = [
@@ -576,6 +595,63 @@ export class QuestDBService {
     const sql = `SELECT * FROM ${table} ${where} ORDER BY ${orderBy} LIMIT 1;`;
     const res = await this.query(sql);
     return res.rows[0] || null;
+  }
+
+  private async ensureUsersTableColumns(): Promise<void> {
+    try {
+      const columnsToAdd = [
+        { name: 'google_id', type: 'STRING' },
+        { name: 'name', type: 'STRING' },
+        { name: 'picture', type: 'STRING' },
+        { name: 'access_token', type: 'STRING' },
+        { name: 'refresh_token', type: 'STRING' },
+        { name: 'token_expiry', type: 'TIMESTAMP' },
+        { name: 'last_login_at', type: 'TIMESTAMP' },
+        { name: 'login_count', type: 'LONG' },
+        { name: 'locale', type: 'STRING' },
+        { name: 'hd', type: 'STRING' },
+        { name: 'auth_provider', type: 'STRING' },
+        { name: 'current_sign_in_ip', type: 'STRING' },
+        { name: 'last_sign_in_ip', type: 'STRING' },
+        { name: 'sign_in_count', type: 'LONG' },
+        { name: 'tos_accepted_at', type: 'TIMESTAMP' },
+        { name: 'email_verified', type: 'BOOLEAN' }
+      ];
+
+      // Check each column and add if it doesn't exist
+      for (const column of columnsToAdd) {
+        try {
+          const checkSql = `SELECT * FROM table_columns('users') WHERE column = '${column.name}'`;
+          const result = await this.pgClient.query(checkSql);
+          
+          if (result.rows.length === 0) {
+            const addColumnSql = `ALTER TABLE users ADD COLUMN ${column.name} ${column.type}`;
+            await this.pgClient.query(addColumnSql);
+            logger.debug(`✅ Added column '${column.name}' to users table`);
+          }
+        } catch (error) {
+          logger.warn(`Could not check/add column '${column.name}':`, error);
+        }
+      }
+      
+      // Set default values
+      await this.pgClient.query(`
+        UPDATE users 
+        SET 
+          login_count = COALESCE(login_count, 0),
+          sign_in_count = COALESCE(sign_in_count, 0),
+          auth_provider = COALESCE(auth_provider, 'google'),
+          email_verified = COALESCE(email_verified, false)
+        WHERE 
+          login_count IS NULL 
+          OR sign_in_count IS NULL 
+          OR auth_provider IS NULL 
+          OR email_verified IS NULL
+      `);
+      
+    } catch (error) {
+      logger.error('Error ensuring users table columns:', error);
+    }
   }
 
   async close(): Promise<void> {
