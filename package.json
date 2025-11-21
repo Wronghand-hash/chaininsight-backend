@@ -43,6 +43,7 @@
     "bs58": "^6.0.0",
     "cron": "^4.3.3",
     "ethers": "^6.15.0",
+    "google-auth-library": "^10.5.0",
     "ioredis": "^5.8.2",
     "kafkajs": "^2.2.4",
     "swagger-jsdoc": "^6.2.8",

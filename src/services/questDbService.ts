@@ -85,6 +85,18 @@ export class QuestDBService {
     await this.pgClient.query(kolTradesCreateSql);
     logger.debug(`✅ Table created: kol_trades`);
 
+    // users table
+    const usersCreateSql = `CREATE TABLE IF NOT EXISTS users (
+        created_at TIMESTAMP,
+        username STRING,
+        email SYMBOL,
+        verified BOOLEAN,
+        updated_at TIMESTAMP,
+        twitter_addresses STRING
+      ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`;
+    await this.pgClient.query(usersCreateSql);
+    logger.debug(`✅ Table created: users`);
+
     // Other tables
     const tables = [
       {
@@ -244,6 +256,41 @@ export class QuestDBService {
 
     try {
       for (const row of rows) {
+        // Special handling for users table (upsert on email)
+        if (table === 'users') {
+          const nowIso = new Date().toISOString();
+          const createdAt = row.created_at || nowIso;
+          const username = String(row.username || '');
+          const email = String(row.email || '');
+          const verified = Boolean(row.verified || false);
+          const twitterAddresses = JSON.stringify(row.twitter_addresses || []);
+          const updatedAt = row.updated_at || nowIso;
+
+          // Check if user exists by email
+          const checkSql = `SELECT count(*) as c FROM users WHERE email = $1;`;
+          const checkRes = await this.pgClient.query(checkSql, [email]);
+          const exists = checkRes.rows[0]?.c > 0;
+
+          if (exists) {
+            // Update existing user
+            const esc = (s: string) => s.replace(/'/g, "''");
+            const updateSql = `
+              UPDATE users 
+              SET username = '${esc(username)}', 
+                  verified = ${verified}, 
+                  updated_at = '${updatedAt}',
+                  twitter_addresses = '${esc(twitterAddresses)}'
+              WHERE email = '${esc(email)}';
+            `;
+            await this.pgClient.query(updateSql);
+          } else {
+            // Insert new user
+            const insertSql = `INSERT INTO users (created_at, username, email, verified, updated_at, twitter_addresses) VALUES ($1, $2, $3, $4, $5, $6);`;
+            await this.pgClient.query(insertSql, [createdAt, username, email, verified, updatedAt, twitterAddresses]);
+          }
+          continue;
+        }
+
         // Special upsert for token_metrics
         if (table === 'token_metrics') {
           const nowIso = new Date().toISOString();
@@ -352,7 +399,7 @@ export class QuestDBService {
           // Check if a plan already exists for this user and service type
           const checkSql = `SELECT count(*) as c FROM user_posts_plans WHERE twitter_id = $1 AND service_type = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [twitterId, serviceType]);
-          
+
           if (checkRes.rows[0]?.c > 0) {
             // Update existing plan - don't update the timestamp as it's a designated column
             // Using string interpolation for QuestDB compatibility
@@ -377,7 +424,7 @@ export class QuestDBService {
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
             `;
             await this.pgClient.query(insertSql, [
-              ts, twitterId, username, serviceType, 
+              ts, twitterId, username, serviceType,
               createdAt, expireAt, totalPostsAllowed, totalPostsCount,
               row.twitter_community || '', row.token || ''
             ]);
