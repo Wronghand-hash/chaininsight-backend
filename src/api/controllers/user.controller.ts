@@ -29,7 +29,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         const { code } = req.query;
         const clientIp = req.ip || req.socket.remoteAddress || '';
 
-        logger.info('Google OAuth callback received', { 
+        logger.info('Google OAuth callback received', {
             code: code ? 'received' : 'missing',
             clientIp,
             queryParams: Object.keys(req.query)
@@ -43,7 +43,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         // Exchange code for tokens
         logger.info('Exchanging authorization code for tokens...', { clientIp });
         const tokens = await usersService.getGoogleTokens(code);
-        logger.info('Successfully obtained tokens', { 
+        logger.info('Successfully obtained tokens', {
             clientIp,
             hasAccessToken: !!tokens.access_token,
             hasRefreshToken: !!tokens.refresh_token,
@@ -72,6 +72,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         logger.info('Received user info from Google', userInfoLog);
 
         // Prepare user data with all available information
+        // Prepare user data with proper typing
         const userData = {
             sub: userInfo.sub,
             email: userInfo.email,
@@ -80,16 +81,21 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             locale: userInfo.locale,
             hd: userInfo.hd,
             email_verified: userInfo.email_verified,
-            // Authentication data
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+            access_token: tokens.access_token || undefined,  // Convert null to undefined
+            refresh_token: tokens.refresh_token || undefined, // Convert null to undefined
+            token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : undefined,
             last_login_at: new Date().toISOString(),
             current_sign_in_ip: clientIp,
-            // These will be updated in the service
+            last_sign_in_ip: clientIp,
             auth_provider: 'google',
-            verified: userInfo.email_verified || false
+            verified: userInfo.email_verified || false,
+            // Initialize counters to 0 if they don't exist
+            login_count: 0,
+            sign_in_count: 0
         };
+
+        // Find or create user
+        logger.info('Finding or creating user in database...', { email: userInfo.email, clientIp });
 
         // Find or create user
         logger.info('Finding or creating user in database...', { email: userInfo.email, clientIp });
@@ -151,11 +157,30 @@ export const verifyGoogleToken = async (req: Request, res: Response, next: NextF
         }
 
         const payload = await usersService.verifyGoogleToken(idToken);
+
+        // Ensure required fields are present
+        if (!payload?.email) {
+            return res.status(400).json({ error: 'Invalid ID token: email is required' });
+        }
+
+        const clientIp = req.ip || req.socket.remoteAddress || '';
+
         const user = await usersService.findOrCreateGoogleUser({
-            sub: payload?.sub,
-            email: payload?.email,
-            name: payload?.name,
-            picture: payload?.picture
+            sub: payload.sub || '',
+            email: payload.email,  // This is now guaranteed to be a string
+            name: payload.name,
+            picture: payload.picture,
+            locale: payload.locale,
+            hd: payload.hd,
+            email_verified: payload.email_verified,
+            access_token: undefined,
+            refresh_token: undefined,
+            token_expiry: undefined,
+            last_login_at: new Date().toISOString(),
+            current_sign_in_ip: clientIp,
+            last_sign_in_ip: clientIp,
+            login_count: 0,
+            sign_in_count: 0
         });
 
         res.json({

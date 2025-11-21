@@ -104,16 +104,46 @@ export class UsersService {
     }
 
     // Find or create user based on Google profile
-    async findOrCreateGoogleUser(googleUser: {
-        sub: string | undefined;
-        email: string | undefined;
-        name?: string;
-        picture?: string;
+    async findOrCreateGoogleUser(googleUser: GoogleUserInfo & {
+        access_token?: string;
+        refresh_token?: string;
+        token_expiry?: string;
+        last_login_at?: string;
+        login_count?: number;
+        current_sign_in_ip?: string;
+        last_sign_in_ip?: string;
+        sign_in_count?: number;
     }) {
         try {
             if (!googleUser.sub || !googleUser.email) {
                 throw new Error('Google user ID and email are required');
             }
+
+            // Prepare user data
+            const userData: Partial<User> = {
+                username: googleUser.email.split('@')[0],
+                email: googleUser.email,
+                verified: true,
+                google_id: googleUser.sub,
+                name: googleUser.name,
+                picture: googleUser.picture,
+                locale: googleUser.locale,
+                hd: googleUser.hd,
+                twitter_addresses: [],
+                auth_provider: 'google',
+                email_verified: googleUser.email_verified,
+                // Update login tracking
+                last_login_at: new Date().toISOString(),
+                current_sign_in_ip: googleUser.current_sign_in_ip,
+                last_sign_in_ip: googleUser.last_sign_in_ip,
+                login_count: (googleUser.login_count || 0) + 1,
+                sign_in_count: (googleUser.sign_in_count || 0) + 1,
+                // OAuth tokens
+                access_token: googleUser.access_token,
+                refresh_token: googleUser.refresh_token,
+                token_expiry: googleUser.token_expiry
+            };
+
             // Try to find user by google_id first
             let user = await this.getUserByGoogleId(googleUser.sub);
 
@@ -122,20 +152,31 @@ export class UsersService {
                 user = await this.getUserByEmail(googleUser.email);
 
                 if (user) {
-                    // Update existing user with google_id
-                    await this.updateUserGoogleId(googleUser.email, googleUser.sub);
+                    // Update existing user with new data
+                    user = await this.createOrUpdateUser({
+                        ...user,
+                        ...userData,
+                        // Don't reset these fields when updating
+                        created_at: user.created_at,
+                        updated_at: new Date().toISOString()
+                    });
                 } else {
                     // Create new user
                     user = await this.createOrUpdateUser({
-                        username: googleUser.email.split('@')[0],
-                        email: googleUser.email,
-                        verified: true,
-                        google_id: googleUser.sub,
-                        name: googleUser.name,
-                        picture: googleUser.picture,
-                        twitter_addresses: []
+                        ...userData,
+                        created_at: new Date().toISOString(),
+                        updated_at: new Date().toISOString()
                     });
                 }
+            } else {
+                // Update existing Google user
+                user = await this.createOrUpdateUser({
+                    ...user,
+                    ...userData,
+                    // Don't reset these fields when updating
+                    created_at: user.created_at,
+                    updated_at: new Date().toISOString()
+                });
             }
 
             return user;
@@ -208,10 +249,10 @@ export class UsersService {
             const row = {
                 username: userData.username || '',
                 email: userData.email || '',
-                verified: Boolean(userData.verified),
+                verified: userData.verified || false,
                 created_at: userData.created_at || nowIso,
                 updated_at: nowIso,
-                twitter_addresses: userData.twitter_addresses || [],
+                twitter_addresses: JSON.stringify(userData.twitter_addresses || []),
                 google_id: userData.google_id || null,
                 name: userData.name || null,
                 picture: userData.picture || null,
@@ -230,13 +271,48 @@ export class UsersService {
                 email_verified: userData.email_verified || false
             };
 
-            await questdbService.insertBatch('users', [row]);
+            // Check if user exists
+            const existingUser = userData.google_id
+                ? await this.getUserByGoogleId(userData.google_id)
+                : await this.getUserByEmail(row.email);
 
-            // Fetch the updated user
+            if (existingUser) {
+                // Update existing user
+                const updateFields = Object.entries(row)
+                    .filter(([key]) => key !== 'created_at') // Don't update created_at
+                    .map(([key, value]) => {
+                        if (value === null) return `${key} = NULL`;
+                        if (typeof value === 'boolean') return `${key} = ${value}`; // Handle boolean values
+                        return `${key} = '${value}'`;
+                    })
+                    .join(', ');
+
+                const sql = `UPDATE users 
+                       SET ${updateFields}
+                       WHERE email = '${row.email.replace(/'/g, "''")}';`;
+
+                await questdbService.query(sql);
+            } else {
+                // Insert new user
+                const columns = Object.keys(row).join(', ');
+                const values = Object.values(row)
+                    .map(v => {
+                        if (v === null) return 'NULL';
+                        if (typeof v === 'boolean') return v ? 'true' : 'false'; // Handle boolean values
+                        return `'${v}'`;
+                    })
+                    .join(', ');
+
+                const sql = `INSERT INTO users (${columns}) VALUES (${values});`;
+                await questdbService.query(sql);
+            }
+
+            // Fetch the updated/inserted user
             const user = userData.google_id
                 ? await this.getUserByGoogleId(userData.google_id)
                 : await this.getUserByEmail(row.email);
-            return user || null;
+
+            return user;
         } catch (error) {
             logger.error('Error creating/updating user:', error);
             throw error;
