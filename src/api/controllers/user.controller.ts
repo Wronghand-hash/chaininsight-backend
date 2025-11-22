@@ -123,30 +123,30 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             clientIp
         });
 
-        // Prepare response (no token in JSON to avoid exposure)
-        const response = {
-            message: 'Successfully authenticated with Google',
-            user: {
-                id: user?.google_id,
-                email: user?.email,
-                name: user?.name,
-                picture: user?.picture,
-                verified: user?.verified,
-                email_verified: user?.email_verified,
-                locale: user?.locale,
-                auth_provider: user?.auth_provider,
-                login_count: user?.login_count,
-                last_login: user?.last_login_at
-            },
-            // Redirect to frontend or dashboard instead of just JSON
-            redirect: '/dashboard'  // Or your app's post-login page
-        };
+        console.log(user?.picture, userInfo.picture, "picutre")
+
+        // Prepare user data for URL parameters with manual query string construction
+        const params = [];
+        if (user?.email) params.push(`email=${encodeURIComponent(user.email)}`);
+        if (userInfo?.name) params.push(`name=${encodeURIComponent(userInfo.name)}`);
+        if (userInfo?.picture && userInfo.picture.startsWith('http')) {
+            // Add picture URL as-is without additional encoding
+            params.push(`picture=${userInfo.picture}`);
+        }
+
+        // Create redirect URL with user data as query parameters
+        const redirectBase = '/dashboard';
+        const queryString = params.length > 0 ? `?${params.join('&')}` : '';
+        const redirectUrl = `${redirectBase}${queryString}`;
+
         logger.info('Google authentication completed successfully', {
             user_email: user?.email,
-            user_id: user?.google_id
+            user_id: user?.google_id,
+            redirect_url: redirectUrl
         });
-        // NEW: Redirect instead of json to leverage cookies (or json if you prefer, but redirect is safer)
-        res.redirect(response.redirect);  // Change to res.json(response) if needed, but cookies are set either way
+
+        // Redirect with user data in query parameters
+        res.redirect(redirectUrl);
     } catch (error) {
         logger.error('Error in Google auth callback:', {
             error: error instanceof Error ? error.message : 'Unknown error',
