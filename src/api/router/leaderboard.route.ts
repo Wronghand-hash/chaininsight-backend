@@ -5,7 +5,7 @@ import { kolTradeService } from '../services/kolsActivity.service';
 import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 import { freeTrialController } from '../controllers/freeTrial.controller';
-import { googleAuthCallback, googleAuthInit, verifyGoogleToken } from '../controllers/user.controller';
+import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser } from '../controllers/user.controller';
 
 const kolsLeaderboardRouter = Router();
 /**
@@ -276,6 +276,31 @@ kolsLeaderboardRouter.post('/payment/status', getPaymentStatus);
  *         description: Internal server error
  */
 kolsLeaderboardRouter.get('/check-community-admin', freeTrialController.checkCommunityAdmin);
+
+/**
+ * @swagger
+ * /kol/auth/logout:
+ *   post:
+ *     summary: Logout user and clear authentication cookies
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Successfully logged out
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: 'Successfully logged out'
+ *       500:
+ *         description: Internal server error during logout
+ */
+kolsLeaderboardRouter.post('/auth/logout', logoutUser);
 
 
 /**

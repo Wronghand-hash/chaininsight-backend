@@ -100,19 +100,22 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         };
         logger.info('User processed successfully', userLogData);
 
-        // NEW: Set real Google opaque tokens as secure HttpOnly cookies
+        // UPDATED: Set real Google opaque tokens as secure HttpOnly cookies
         // This ensures the payment controller gets valid opaque tokens for Google validation
+        // For cross-domain testing (frontend/backend on different domains), set sameSite: 'none'
+        // and secure: false (for HTTP/local dev). In production, use secure: true and HTTPS.
+        // Ensure frontend requests include withCredentials: true and backend CORS allows credentials.
         res.cookie('google_access_token', tokens.access_token, {
             httpOnly: true,  // Prevents JS access (secure)
-            secure: process.env.NODE_ENV === 'production',  // HTTPS only in prod
-            sameSite: 'strict',  // CSRF protection
+            secure: false,   // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
+            sameSite: 'none', // Allow cross-site requests (required for different domains)
             maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000  // Match Google's expiry (~1h)
         });
         if (tokens.refresh_token) {
             res.cookie('google_refresh_token', tokens.refresh_token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: false,  // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
+                sameSite: 'none', // Allow cross-site requests (required for different domains)
                 maxAge: 7 * 24 * 3600 * 1000  // 7 days for refresh
             });
         }
@@ -153,6 +156,42 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             stack: error instanceof Error ? error.stack : undefined
         });
         next(error);
+    }
+};
+
+// Logout user
+export const logoutUser = (req: Request, res: Response) => {
+    try {
+        // Clear Google auth cookies
+        res.clearCookie('google_access_token', {
+            httpOnly: true,
+            secure: false,  // Should match the settings used when setting the cookie
+            sameSite: 'none'
+        });
+        
+        res.clearCookie('google_refresh_token', {
+            httpOnly: true,
+            secure: false,  // Should match the settings used when setting the cookie
+            sameSite: 'none'
+        });
+
+        logger.info('User logged out successfully', { 
+            clientIp: req.ip || req.socket.remoteAddress || 'unknown' 
+        });
+
+        res.status(200).json({ 
+            success: true, 
+            message: 'Successfully logged out' 
+        });
+    } catch (error) {
+        logger.error('Error during logout:', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+            clientIp: req.ip || req.socket.remoteAddress || 'unknown'
+        });
+        res.status(500).json({ 
+            success: false, 
+            error: 'An error occurred during logout' 
+        });
     }
 };
 

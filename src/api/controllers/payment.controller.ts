@@ -294,11 +294,14 @@ const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ t
             logger.debug('Introspecting new access token from refresh.');
             payload = await introspectGoogleToken(newAccessToken);
 
-            // Set new tokens in secure HttpOnly cookies
+            // UPDATED: Set new tokens in secure HttpOnly cookies
+            // For cross-domain testing (frontend/backend on different domains), set sameSite: 'none'
+            // and secure: false (for HTTP/local dev). In production, use secure: true and HTTPS.
+            // Ensure frontend requests include withCredentials: true and backend CORS allows credentials.
             res.cookie('google_access_token', newAccessToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: false,  // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
+                sameSite: 'none', // Allow cross-site requests (required for different domains)
                 maxAge: 3600 * 1000 // 1 hour
             });
             logger.debug('New access token cookie set.', { maxAge: 3600 * 1000 });
@@ -306,8 +309,8 @@ const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ t
             if (newRefreshToken) {
                 res.cookie('google_refresh_token', newRefreshToken, {  // FIXED: res.cookie (was res.cookies in some versions)
                     httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                    sameSite: 'strict',
+                    secure: false,  // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
+                    sameSite: 'none', // Allow cross-site requests (required for different domains)
                     maxAge: 7 * 24 * 3600 * 1000 // 7 days
                 });
                 logger.debug('New refresh token cookie set.', { maxAge: 7 * 24 * 3600 * 1000 });
