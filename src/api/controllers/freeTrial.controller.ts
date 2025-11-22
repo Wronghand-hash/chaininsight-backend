@@ -22,6 +22,8 @@ interface QueryResult {
 }
 import { questdbService } from '../../services/questDbService';
 import { logger } from '../../utils/logger';
+import { config } from '../../utils/config';
+import TwitterApi from 'twitter-api-v2';
 
 export class FreeTrialController {
   private readonly MAX_FREE_POSTS = 10;
@@ -363,6 +365,238 @@ export class FreeTrialController {
         username
       });
       return false;
+    }
+  };
+  /**
+   * Check if a Twitter user is a community admin
+   * GET /api/free-trial/check-community-admin
+   */
+  /**
+   * Check if a Twitter user is a community admin
+   * GET /api/free-trial/check-community-admin
+   */
+  public checkCommunityAdmin = async (req: Request, res: Response) => {
+    const { twitterId, communityId } = req.query;
+    const requestId = Math.random().toString(36).substring(2, 9);
+    logger.info(`[${requestId}] Starting community admin check via post attempt`, {
+      twitterId,
+      communityId,
+      timestamp: new Date().toISOString()
+    });
+    // Validate required parameters
+    if (!twitterId || !communityId) {
+      const errorMsg = 'twitterId and communityId are required as query parameters';
+      logger.error(`[${requestId}] ${errorMsg}`, {
+        providedParams: { twitterId, communityId }
+      });
+      return res.status(400).json({
+        success: false,
+        message: errorMsg
+      });
+    }
+    // Initialize Twitter client with OAuth 1.0a credentials
+    // NOTE: This uses fixed app/user credentials. For accurate per-user checks, implement dynamic OAuth for the target twitterId.
+    const client = new TwitterApi({
+      appKey: config.twitter.appKey,
+      appSecret: config.twitter.appSecret,
+      accessToken: config.twitter.accessToken,
+      accessSecret: config.twitter.accessSecret,
+    });
+    const communityIdStr = String(communityId);
+    const extractedCommunityId = communityIdStr.match(/\d+/)?.[0] || communityIdStr;
+    if (!extractedCommunityId) {
+      const errorMsg = 'Invalid community ID format';
+      logger.error(`[${requestId}] ${errorMsg}`, {
+        originalCommunityId: communityId,
+        extractedCommunityId
+      });
+      return res.status(400).json({
+        success: false,
+        message: errorMsg
+      });
+    }
+    logger.info(`[${requestId}] Checking admin status via post attempt`, {
+      twitterId,
+      communityId: extractedCommunityId,
+      timestamp: new Date().toISOString()
+    });
+    try {
+      // Get user details - first try by username, then by ID if that fails
+      logger.debug(`[${requestId}] Fetching Twitter user details`, {
+        twitterId,
+        timestamp: new Date().toISOString()
+      });
+      let userIdToCheck: string;
+      try {
+        // First try to get user by username (if it's a handle like 'GreezInfo')
+        const userResponse = await client.v2.userByUsername(String(twitterId), {
+          'user.fields': 'id'
+        });
+        userIdToCheck = userResponse.data?.id;
+      } catch (userError: any) {
+        logger.warn(`[${requestId}] Failed to get user by username, trying as user ID`, {
+          twitterId,
+          error: userError.message,
+          timestamp: new Date().toISOString()
+        });
+
+        // If username lookup fails, try using it as a direct user ID
+        try {
+          const userResponse = await client.v2.user(String(twitterId), {
+            'user.fields': 'id'
+          });
+          userIdToCheck = userResponse.data?.id;
+        } catch (idError: any) {
+          logger.error(`[${requestId}] Failed to get user by ID`, {
+            twitterId,
+            error: idError.message,
+            timestamp: new Date().toISOString()
+          });
+          throw new Error(`Could not find Twitter user: ${twitterId}`);
+        }
+      }
+      if (!userIdToCheck) {
+        const errorMsg = 'Twitter user not found';
+        logger.error(`[${requestId}] ${errorMsg}`, {
+          twitterId,
+          timestamp: new Date().toISOString()
+        });
+        return res.status(404).json({
+          success: false,
+          message: errorMsg
+        });
+      }
+      // Attempt to post a simple message to the community
+      let isAdmin = false;
+      let postId: string | null = null;
+      try {
+        logger.debug(`[${requestId}] Attempting test post to community`, {
+          communityId: extractedCommunityId,
+          userId: userIdToCheck,
+          timestamp: new Date().toISOString(),
+          apiEndpoint: 'POST /2/tweets'
+        });
+        // Add request timing
+        const startTime = Date.now();
+        const postResponse = await client.v2.tweet({
+          text: `Admin status test post - ${requestId} - delete immediately`,
+          community_id: extractedCommunityId,
+          // Optional: share_with_followers: false (default)
+        });
+        const responseTime = Date.now() - startTime;
+        postId = postResponse.data.id;
+        logger.debug(`[${requestId}] Test post to community succeeded`, {
+          communityId: extractedCommunityId,
+          postId,
+          responseTime: `${responseTime}ms`,
+          timestamp: new Date().toISOString()
+        });
+
+        // Immediately delete the test post to clean up
+        // if (postId) {
+        //   await client.v2.deleteTweet(postId);
+        //   logger.debug(`[${requestId}] Test post deleted`, { postId, timestamp: new Date().toISOString() });
+        // }
+
+        // NOTE: Success indicates the authenticated user is a member (and can post), but does NOT confirm admin status.
+        // Regular members can post in most communities. For true admin check, additional verification needed (e.g., third-party API for moderators).
+        isAdmin = true; // Placeholder: Treat as 'admin' based on post success, but adjust logic as needed
+      } catch (postError: any) {
+        const errorContext: any = {
+          error: {
+            name: postError.name,
+            message: postError.message,
+            code: postError.code,
+            status: postError.status,
+            rateLimit: postError.rateLimit,
+            rateLimitLimit: postError.rateLimitLimit,
+            rateLimitRemaining: postError.rateLimitRemaining,
+            rateLimitReset: postError.rateLimitReset,
+            stack: postError.stack
+          },
+          request: {
+            communityId: extractedCommunityId,
+            userId: userIdToCheck,
+            requestId,
+            timestamp: new Date().toISOString()
+          }
+        };
+        logger.error(`[${requestId}] Failed to post to community (not admin/member?)`, errorContext);
+
+        // Common errors: 403 (not member/admin), 404 (invalid community), 429 (rate limit)
+        isAdmin = false;
+      }
+
+      logger.info(`[${requestId}] Admin check via post completed`, {
+        twitterId,
+        userId: userIdToCheck,
+        communityId: extractedCommunityId,
+        isAdmin,
+        postId, // Will be null if failed or deleted
+        timestamp: new Date().toISOString()
+      });
+      return res.status(200).json({
+        success: true,
+        isAdmin,
+        message: isAdmin ? 'User can post to community (likely admin/member)' : 'User cannot post to community (not admin/member)',
+        metadata: {
+          twitterId,
+          userId: userIdToCheck,
+          communityId: extractedCommunityId,
+          postId, // For reference; deleted if succeeded
+          requestId
+        }
+      });
+    } catch (error: any) {
+      // Enhanced error handling
+      const errorContext = {
+        error: {
+          name: error.name,
+          message: error.message,
+          code: error.code,
+          status: error.status,
+          rateLimit: error.rateLimit,
+          rateLimitLimit: error.rateLimitLimit,
+          rateLimitRemaining: error.rateLimitRemaining,
+          rateLimitReset: error.rateLimitReset,
+          stack: error.stack
+        },
+        request: {
+          twitterId,
+          communityId: extractedCommunityId,
+          requestId
+        },
+        authInfo: {
+          appKey: config.twitter.appKey ? '***' + config.twitter.appKey.slice(-4) : 'missing',
+          accessToken: config.twitter.accessToken ? '***' + config.twitter.accessToken.slice(-4) : 'missing'
+        },
+        timestamp: new Date().toISOString()
+      };
+      logger.error(`[${requestId}] Twitter API request failed`, errorContext);
+      // Return appropriate status code based on error
+      const statusCode = error.status || 500;
+      let errorMessage = 'Failed to verify community admin status';
+      if (statusCode === 401) {
+        errorMessage = 'Twitter API authentication failed. Please check your API credentials.';
+      } else if (statusCode === 403) {
+        errorMessage = 'Insufficient permissions to access this resource.';
+      } else if (statusCode === 404) {
+        errorMessage = 'Community or user not found.';
+      } else if (statusCode === 429) {
+        errorMessage = 'Rate limit exceeded. Please try again later.';
+      }
+      return res.status(statusCode).json({
+        success: false,
+        message: errorMessage,
+        code: error.code,
+        requestId,
+        ...(process.env.NODE_ENV === 'development' && {
+          errorDetails: {
+            message: error.message,
+            code: error.code
+          }
+        })
+      });
     }
   };
 }

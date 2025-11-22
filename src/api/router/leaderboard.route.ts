@@ -237,6 +237,46 @@ kolsLeaderboardRouter.post('/payment/init', generateWalletKeypair);
  */
 kolsLeaderboardRouter.post('/payment/status', getPaymentStatus);
 
+/**
+ * @swagger
+ * /kol/check-community-admin:
+ *   get:
+ *     summary: Check if a Twitter user is a community admin
+ *     tags: [Community]
+ *     parameters:
+ *       - in: query
+ *         name: twitterId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Twitter user ID to check
+ *       - in: query
+ *         name: communityId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Community ID to check admin status for
+ *     responses:
+ *       200:
+ *         description: Successfully checked admin status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 isAdmin:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       400:
+ *         description: Missing required parameters
+ *       500:
+ *         description: Internal server error
+ */
+kolsLeaderboardRouter.get('/check-community-admin', freeTrialController.checkCommunityAdmin);
+
 
 /**
  * @swagger

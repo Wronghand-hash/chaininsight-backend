@@ -9,11 +9,11 @@ export const config = {
 
   twitter: {
     clientId: process.env.TWITTER_CLIENT_ID || 'VzM5YWNJdnZpOFRGWUhaaEFxVVo6MTpjaQ',
-    appKey: process.env.TWITTER_APP_KEY || '3TiDnGDy17vgyHwq7pen11cHd',
-    appSecret: process.env.TWITTER_APP_SECRET || 'Yu6zwoztmMdwgnsdon5oHzWfdkvPCjUQx1iPMaYky6L8bsdOw4',
-    accessToken: process.env.TWITTER_ACCESS_TOKEN || '1769379822684229632-Wna0KjPL0b9puuzucpUYSqewULjPp5',
-    accessSecret: process.env.TWITTER_ACCESS_SECRET || '8bSXJ0sc0UsG1TBZpdRSvWrb1Huqet9o0p8yfKUAdvlNx',
-    clientSecret: process.env.TWITTER_CLIENT_SECRET || '4S0q6Ht2-tPXitqHQmxEKiPKJEKVE203UzPaeEFOL16F8hNZhq',
+    appKey: process.env.TWITTER_APP_KEY || 'GEgCr1PO2PPz7QEnJQMV7YLYL',
+    appSecret: process.env.TWITTER_APP_SECRET || 'JZLLNLne1NfrAJSASKoPaFcI13WX9Km8AlACGcFXtWPFNeJkj0',
+    accessToken: process.env.TWITTER_ACCESS_TOKEN || '1769379822684229632-HN7X0arlO7x0QfznoK1cYvZqbohdX7',
+    accessSecret: process.env.TWITTER_ACCESS_SECRET || '6p8QeqlgRj1QKkMaenrSOLAdsTX0Q8h1MP4PYrgLQ5I8F',
+    clientSecret: process.env.TWITTER_CLIENT_SECRET || 'wUqAictUHTDg2tv07Neqr0zeugsEgaCn4njD6nxneLtspiiFIW',
   },
 
   questdb: {
