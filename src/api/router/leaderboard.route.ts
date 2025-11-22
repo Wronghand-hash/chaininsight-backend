@@ -146,6 +146,9 @@ kolsLeaderboardRouter.get('/top-tokens', async (req: Request, res: Response, nex
  *             type: object
  *             required: [chain, twitterId, amount, wallet]
  *             properties:
+ *               email:
+ *                 type: string
+ *                 description: User's email
  *               chain:
  *                 type: string
  *                 enum: [BSC, SOL]

@@ -7,7 +7,8 @@ import { logger } from './utils/logger';
 import { questdbService } from './services/questDbService';
 import { kafkaService } from './services/kafka.service';  // NEW: Kafka import
 import kolsLeaderboardRouter from './api/router/leaderboard.route';
-import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller';
+import { tokenMetricsDexscreenerPoller } from './services/tokenMetricsDexscreenerPoller'
+import cookieParser from 'cookie-parser';  // Ensure this middleware is used: app.use(cookieParser());
 import { MigrationRunner } from './db/migrations/migration-runner';
 import swaggerSpec from './config/swagger';
 import { walletService } from './services/payments/paymentService';
@@ -24,6 +25,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
 
 // Swagger documentation
 app.use('/scanner/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {

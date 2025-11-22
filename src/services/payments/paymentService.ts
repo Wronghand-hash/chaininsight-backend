@@ -13,11 +13,13 @@ export class WalletService {
         serviceType: string = 'x_alerts_service',
         wallet: string,
         token: string,
-        twitter_community: string
+        twitter_community: string,
+        email: string,
     ): Promise<{
         chain: Chain;
         twitterId: string;
         amount: number;
+        email: string;
         serviceType: string;
         wallet: string;
         publicKey: string;
@@ -48,6 +50,7 @@ export class WalletService {
         const paymentHistoryRow = {
             timestamp: nowIso,
             twitterId,
+            email,
             amount,
             serviceType,
             chain,
@@ -74,6 +77,7 @@ export class WalletService {
         logger.info('🔑 New Wallet Generated', {
             chain,
             twitterId,
+            email,
             amount,
             serviceType,
             address,
@@ -85,6 +89,7 @@ export class WalletService {
         return {
             chain,
             twitterId,
+            email,
             amount,
             serviceType,
             wallet,

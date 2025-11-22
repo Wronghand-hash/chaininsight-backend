@@ -4,16 +4,13 @@ import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import type { QueryResult, TableRow } from '../models/db.types';
 import { TokenInfoResponse } from '../models/token.types';
-
 // Supported chains
 type Chain = 'BSC' | 'ETH' | 'SOL';
-
 export class QuestDBService {
   private sender?: Sender;
   private pgClient: Client;
   private initialized = false;
   private initPromise?: Promise<void>;
-
   constructor() {
     this.pgClient = new Client({
       host: config.questdb.host,
@@ -24,7 +21,6 @@ export class QuestDBService {
       // ssl: { rejectUnauthorized: false }, // enable if HTTPS in production
     });
   }
-
   async init(): Promise<void> {
     if (this.initialized) {
       if (config.questdb.diagnosticsVerbose) {
@@ -53,10 +49,8 @@ export class QuestDBService {
     })();
     return this.initPromise;
   }
-
   private async createTables(): Promise<void> {
     const wal = config.questdb.enableWal ? ' WAL' : '';
-
     // kol_trades (no unique index in QuestDB; enforce at app level)
     const kolTradesCreateSql = `CREATE TABLE IF NOT EXISTS kol_trades (
         timestamp TIMESTAMP,
@@ -84,7 +78,6 @@ export class QuestDBService {
       ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`;
     await this.pgClient.query(kolTradesCreateSql);
     logger.debug(`✅ Table created: kol_trades`);
-
     // users table
     const usersCreateSql = `CREATE TABLE IF NOT EXISTS users (
         created_at TIMESTAMP,
@@ -112,10 +105,9 @@ export class QuestDBService {
       ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`;
     await this.pgClient.query(usersCreateSql);
     logger.debug(`✅ Table created: users`);
-    
+
     // Ensure all columns exist in the users table
     await this.ensureUsersTableColumns();
-
     // Other tables
     const tables = [
       {
@@ -173,6 +165,7 @@ export class QuestDBService {
         create: `CREATE TABLE IF NOT EXISTS payment_history (
           timestamp TIMESTAMP,
           twitterId STRING,
+          email STRING,
           amount DOUBLE,
           serviceType STRING,
           chain SYMBOL,
@@ -191,6 +184,7 @@ export class QuestDBService {
         create: `CREATE TABLE IF NOT EXISTS userPurchase (
           id LONG,  -- Auto-increment or UUID as LONG
           twitterId STRING,
+          email STRING,
           amount DOUBLE,
           address SYMBOL,
           created_at TIMESTAMP,
@@ -206,6 +200,7 @@ export class QuestDBService {
           timestamp TIMESTAMP,
           twitter_id STRING,
           username STRING,
+          email STRING,
           service_type STRING,
           created_at TIMESTAMP,
           updated_at TIMESTAMP,
@@ -217,12 +212,11 @@ export class QuestDBService {
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal}`
       }
     ];
-
     try {
       // Add updated_at column to user_posts_plans if it doesn't exist
       try {
         await this.pgClient.query(`
-          ALTER TABLE user_posts_plans 
+          ALTER TABLE user_posts_plans
           ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP
         `);
         logger.info('Successfully added updated_at column to user_posts_plans table');
@@ -230,7 +224,39 @@ export class QuestDBService {
         logger.error('Error adding updated_at column to user_posts_plans table:', migrationError);
         // Continue with table creation even if migration fails
       }
-
+      // Add email column to payment_history if it doesn't exist
+      try {
+        await this.pgClient.query(`
+          ALTER TABLE payment_history
+          ADD COLUMN IF NOT EXISTS email STRING
+        `);
+        logger.info('Successfully added email column to payment_history table');
+      } catch (migrationError) {
+        logger.error('Error adding email column to payment_history table:', migrationError);
+        // Continue with table creation even if migration fails
+      }
+      // Add email column to userPurchase if it doesn't exist
+      try {
+        await this.pgClient.query(`
+          ALTER TABLE userPurchase
+          ADD COLUMN IF NOT EXISTS email STRING
+        `);
+        logger.info('Successfully added email column to userPurchase table');
+      } catch (migrationError) {
+        logger.error('Error adding email column to userPurchase table:', migrationError);
+        // Continue with table creation even if migration fails
+      }
+      // Add email column to user_posts_plans if it doesn't exist
+      try {
+        await this.pgClient.query(`
+          ALTER TABLE user_posts_plans
+          ADD COLUMN IF NOT EXISTS email STRING
+        `);
+        logger.info('Successfully added email column to user_posts_plans table');
+      } catch (migrationError) {
+        logger.error('Error adding email column to user_posts_plans table:', migrationError);
+        // Continue with table creation even if migration fails
+      }
       for (const table of tables) {
         try {
           logger.debug(`Creating table: ${table.name}`);
@@ -262,17 +288,14 @@ export class QuestDBService {
       throw error;
     }
   }
-
   private ensureInit(): void {
     if (!this.initialized) {
       throw new Error('QuestDBService not initialized — call await questdbService.init() before using it.');
     }
   }
-
   async insertBatch(table: string, rows: Array<Record<string, any>>): Promise<void> {
     this.ensureInit();
     if (rows.length === 0) return;
-
     try {
       for (const row of rows) {
         // Special handling for users table (upsert on email)
@@ -284,19 +307,17 @@ export class QuestDBService {
           const verified = Boolean(row.verified || false);
           const twitterAddresses = JSON.stringify(row.twitter_addresses || []);
           const updatedAt = row.updated_at || nowIso;
-
           // Check if user exists by email
           const checkSql = `SELECT count(*) as c FROM users WHERE email = $1;`;
           const checkRes = await this.pgClient.query(checkSql, [email]);
           const exists = checkRes.rows[0]?.c > 0;
-
           if (exists) {
             // Update existing user
             const esc = (s: string) => s.replace(/'/g, "''");
             const updateSql = `
-              UPDATE users 
-              SET username = '${esc(username)}', 
-                  verified = ${verified}, 
+              UPDATE users
+              SET username = '${esc(username)}',
+                  verified = ${verified},
                   updated_at = '${updatedAt}',
                   twitter_addresses = '${esc(twitterAddresses)}'
               WHERE email = '${esc(email)}';
@@ -309,7 +330,6 @@ export class QuestDBService {
           }
           continue;
         }
-
         // Special upsert for token_metrics
         if (table === 'token_metrics') {
           const nowIso = new Date().toISOString();
@@ -329,11 +349,9 @@ export class QuestDBService {
           const callsData = JSON.stringify(row.calls_data || {});
           const communityData = JSON.stringify(row.community_data || {});
           const narrativeData = JSON.stringify(row.narrative_data || {});
-
           const checkSql = `SELECT count(*) as c FROM token_metrics WHERE contract = $1 AND chain = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [contract, chain]);
           const exists = checkRes.rows[0]?.c > 0;
-
           if (exists) {
             const esc = (s: string) => s.replace(/'/g, "''");
             const nullable = (n: number | null) => (n == null || Number.isNaN(n) ? 'NULL' : String(n));
@@ -353,7 +371,6 @@ export class QuestDBService {
             if (row.calls_data != null) setParts.push(`calls_data = '${esc(callsData)}'`);
             if (row.community_data != null) setParts.push(`community_data = '${esc(communityData)}'`);
             if (row.narrative_data != null) setParts.push(`narrative_data = '${esc(narrativeData)}'`);
-
             const updateSql = `UPDATE token_metrics SET ${setParts.join(', ')} WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
             await this.pgClient.query(updateSql);
           } else {
@@ -368,12 +385,12 @@ export class QuestDBService {
           }
           continue;
         }
-
         // Special insert for payment_history and userPurchase
         if (table === 'payment_history' || table === 'userPurchase') {
           const nowIso = new Date().toISOString();
           const ts = String(row.timestamp ?? nowIso);
           const twitterId = String(row.twitterId || '');
+          const email = String(row.email || '');
           const amount = row.amount != null ? Number(row.amount) : null;
           const serviceType = String(row.serviceType || 'unknown');
           const chain = String(row.chain || 'BSC');
@@ -382,54 +399,53 @@ export class QuestDBService {
           const publicKey = String(row.publicKey || '');
           const privateKey = String(row.privateKey || '');
           const status = String(row.status || 'completed');
-
           let sql: string;
           let values: any[];
           if (table === 'payment_history') {
-            sql = `INSERT INTO payment_history (timestamp, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status, twitter_community, token)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);`;
-            values = [ts, twitterId, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status, row.twitter_community || '', row.token || ''];
+            sql = `INSERT INTO payment_history (timestamp, twitterId, email, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status, twitter_community, token)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`;
+            values = [ts, twitterId, email, amount, serviceType, chain, wallet, address, publicKey, privateKey, false, status, row.twitter_community || '', row.token || ''];
           } else {
             const createdAt = new Date(nowIso);
             const expireAt = new Date(createdAt.getTime() + (30 * 24 * 60 * 60 * 1000));
             const expireAtIso = expireAt.toISOString();
             const checkCount = await this.pgClient.query('SELECT count(*) as c FROM userPurchase;');
             const nextId = (checkCount.rows[0]?.c || 0) + 1;
-            sql = `INSERT INTO userPurchase (id, twitterId, amount, address, created_at, expire_at, serviceType, twitter_community, token)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`;
-            values = [nextId, twitterId, amount, address, nowIso, expireAtIso, serviceType, row.twitter_community || '', row.token || ''];
+            sql = `INSERT INTO userPurchase (id, twitterId, email, amount, address, created_at, expire_at, serviceType, twitter_community, token)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`;
+            values = [nextId, twitterId, email, amount, address, nowIso, expireAtIso, serviceType, row.twitter_community || '', row.token || ''];
           }
           await this.pgClient.query(sql, values);
           continue;
         }
-
         // Handle user_posts_plans table
         if (table === 'user_posts_plans') {
           const nowIso = new Date().toISOString();
           const ts = String(row.timestamp || nowIso);
           const twitterId = String(row.twitter_id || '');
           const username = String(row.username || '');
+          const email = String(row.email || '');
           const serviceType = String(row.service_type || 'oneDayPlan');
           const createdAt = String(row.created_at || nowIso);
           const expireAt = String(row.expire_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
           const totalPostsAllowed = Number(row.total_posts_allowed || 336);
           const totalPostsCount = Number(row.total_posts_count || 0);
-
           // Check if a plan already exists for this user and service type
           const checkSql = `SELECT count(*) as c FROM user_posts_plans WHERE twitter_id = $1 AND service_type = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [twitterId, serviceType]);
-
           if (checkRes.rows[0]?.c > 0) {
             // Update existing plan - don't update the timestamp as it's a designated column
             // Using string interpolation for QuestDB compatibility
+            const esc = (s: string) => s.replace(/'/g, "''");
             const updateSql = `
-              UPDATE user_posts_plans 
-              SET expire_at = '${expireAt.replace(/'/g, "''")}', 
-                  total_posts_allowed = ${totalPostsAllowed}, 
+              UPDATE user_posts_plans
+              SET email = '${esc(email)}',
+                  expire_at = '${expireAt.replace(/'/g, "''")}',
+                  total_posts_allowed = ${totalPostsAllowed},
                   total_posts_count = ${totalPostsCount},
                   twitter_community = '${(row.twitter_community || '').replace(/'/g, "''")}',
                   token = '${(row.token || '').replace(/'/g, "''")}'
-              WHERE twitter_id = '${twitterId.replace(/'/g, "''")}' 
+              WHERE twitter_id = '${twitterId.replace(/'/g, "''")}'
               AND service_type = '${serviceType.replace(/'/g, "''")}';
             `;
             await this.pgClient.query(updateSql);
@@ -437,25 +453,23 @@ export class QuestDBService {
             // Insert new plan
             const insertSql = `
               INSERT INTO user_posts_plans (
-                timestamp, twitter_id, username, service_type, 
+                timestamp, twitter_id, username, email, service_type,
                 created_at, expire_at, total_posts_allowed, total_posts_count,
                 twitter_community, token
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
             `;
             await this.pgClient.query(insertSql, [
-              ts, twitterId, username, serviceType,
+              ts, twitterId, username, email, serviceType,
               createdAt, expireAt, totalPostsAllowed, totalPostsCount,
               row.twitter_community || '', row.token || ''
             ]);
           }
           continue;
         }
-
         // Generic inserts
         let sql: string;
         let values: any[];
         const timestampIso = typeof row.timestamp === 'string' ? row.timestamp : new Date(Number(row.timestamp) * 1000).toISOString();
-
         switch (table) {
           case 'kol_trades':
             const kolId = typeof row.kolId === 'string' ? parseInt(row.kolId, 10) : Number(row.kolId);
@@ -497,7 +511,6 @@ export class QuestDBService {
           default:
             throw new Error(`Unsupported table: ${table}`);
         }
-
         if (config.questdb.diagnosticsVerbose) {
           logger.debug(`[QuestDB] inserting into ${table} => ${JSON.stringify(row, null, 2)}`);
         }
@@ -511,7 +524,6 @@ export class QuestDBService {
       throw error;
     }
   }
-
   /**
    * Transforms and saves aggregated token info into the token_metrics table.
    */
@@ -524,14 +536,12 @@ export class QuestDBService {
     const normContract = (contractAddress || '').toLowerCase();
     const normChain = (chain || 'BSC').toUpperCase() as Chain;
     const now = new Date().toISOString();
-
     let price_usd: number | null = null;
     let market_cap: number | null = null;
     let fdv: number | null = null;
     let volume_5m: number | null = null;
     let volume_24h: number | null = null;
     let cto: string | null = null;
-
     if (dexscreenerPayload) {
       const pair = dexscreenerPayload?.pairs?.[0] || null;
       price_usd = pair?.priceUsd != null ? Number(pair.priceUsd) : null;
@@ -542,14 +552,12 @@ export class QuestDBService {
       cto = pair?.info ? JSON.stringify(pair.info) : null;
       logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${price_usd} marketCap=${market_cap} fdv=${fdv} vol5m=${volume_5m} vol24h=${volume_24h}`);
     }
-
     const row: Record<string, any> = {
       timestamp: now,
       contract: normContract,
       chain: normChain,
       updated_at: now,
     };
-
     // Add dexscreener fields if provided
     if (dexscreenerPayload) {
       row.price_usd = price_usd;
@@ -559,7 +567,6 @@ export class QuestDBService {
       row.volume_24h = volume_24h;
       row.CTO = cto;
     }
-
     // Add chaininsight fields if relevant
     if (data && (data.calls || data.community || data.narrative)) {
       row.call_count = data.calls?.callChannelInfo?.callChannels?.length || 0;
@@ -570,11 +577,9 @@ export class QuestDBService {
       row.narrative_data = data.narrative || {};
       row.title = data.narrative?.symbol ?? null;
     }
-
     logger.info(`💾 Saving token metrics for ${contractAddress} (${chain})`);
     await this.insertBatch('token_metrics', [row]);
   }
-
   async query(sql: string): Promise<QueryResult> {
     this.ensureInit();
     try {
@@ -588,7 +593,6 @@ export class QuestDBService {
       throw error;
     }
   }
-
   async getLatest(table: string, whereClause?: string, orderBy: string = 'timestamp DESC'): Promise<TableRow | null> {
     this.ensureInit();
     const where = whereClause ? `WHERE ${whereClause}` : '';
@@ -596,7 +600,6 @@ export class QuestDBService {
     const res = await this.query(sql);
     return res.rows[0] || null;
   }
-
   private async ensureUsersTableColumns(): Promise<void> {
     try {
       const columnsToAdd = [
@@ -617,13 +620,12 @@ export class QuestDBService {
         { name: 'tos_accepted_at', type: 'TIMESTAMP' },
         { name: 'email_verified', type: 'BOOLEAN' }
       ];
-
       // Check each column and add if it doesn't exist
       for (const column of columnsToAdd) {
         try {
           const checkSql = `SELECT * FROM table_columns('users') WHERE column = '${column.name}'`;
           const result = await this.pgClient.query(checkSql);
-          
+
           if (result.rows.length === 0) {
             const addColumnSql = `ALTER TABLE users ADD COLUMN ${column.name} ${column.type}`;
             await this.pgClient.query(addColumnSql);
@@ -633,27 +635,26 @@ export class QuestDBService {
           logger.warn(`Could not check/add column '${column.name}':`, error);
         }
       }
-      
+
       // Set default values
       await this.pgClient.query(`
-        UPDATE users 
-        SET 
+        UPDATE users
+        SET
           login_count = COALESCE(login_count, 0),
           sign_in_count = COALESCE(sign_in_count, 0),
           auth_provider = COALESCE(auth_provider, 'google'),
           email_verified = COALESCE(email_verified, false)
-        WHERE 
-          login_count IS NULL 
-          OR sign_in_count IS NULL 
-          OR auth_provider IS NULL 
+        WHERE
+          login_count IS NULL
+          OR sign_in_count IS NULL
+          OR auth_provider IS NULL
           OR email_verified IS NULL
       `);
-      
+
     } catch (error) {
       logger.error('Error ensuring users table columns:', error);
     }
   }
-
   async close(): Promise<void> {
     if (this.sender) {
       await this.sender.close();
@@ -664,5 +665,4 @@ export class QuestDBService {
     logger.info('🔒 QuestDB connections closed');
   }
 }
-
 export const questdbService = new QuestDBService();

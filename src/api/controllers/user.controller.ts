@@ -24,22 +24,20 @@ export const googleAuthInit = (req: Request, res: Response) => {
 };
 
 // Google OAuth2 callback
+// Google OAuth2 callback
 export const googleAuthCallback = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { code } = req.query;
         const clientIp = req.ip || req.socket.remoteAddress || '';
-
         logger.info('Google OAuth callback received', {
             code: code ? 'received' : 'missing',
             clientIp,
             queryParams: Object.keys(req.query)
         });
-
         if (!code || typeof code !== 'string') {
             logger.error('Missing or invalid authorization code', { code, clientIp });
             return res.status(400).json({ error: 'Authorization code is required' });
         }
-
         // Exchange code for tokens
         logger.info('Exchanging authorization code for tokens...', { clientIp });
         const tokens = await usersService.getGoogleTokens(code);
@@ -51,12 +49,10 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             tokenScope: tokens.scope || 'default',
             tokenType: tokens.token_type || 'Bearer'
         });
-
         // Get user info from Google
         logger.info('Fetching user info from Google...', { clientIp });
         const userInfoResponse = await usersService.getGoogleUserInfo(tokens);
         const userInfo = userInfoResponse.data as GoogleUserInfo;
-
         // Log additional user info for debugging
         const userInfoLog = {
             userId: userInfo.sub,
@@ -68,11 +64,8 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             hd: userInfo.hd || 'not provided',
             clientIp
         };
-
         logger.info('Received user info from Google', userInfoLog);
-
         // Prepare user data with all available information
-        // Prepare user data with proper typing
         const userData = {
             sub: userInfo.sub,
             email: userInfo.email,
@@ -93,14 +86,9 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             login_count: 0,
             sign_in_count: 0
         };
-
-        // Find or create user
-        logger.info('Finding or creating user in database...', { email: userInfo.email, clientIp });
-
         // Find or create user
         logger.info('Finding or creating user in database...', { email: userInfo.email, clientIp });
         const user = await usersService.findOrCreateGoogleUser(userData);
-
         // Log user processing result
         const userLogData = {
             userId: user?.google_id,
@@ -110,10 +98,32 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             lastLogin: user?.last_login_at,
             clientIp
         };
-
         logger.info('User processed successfully', userLogData);
 
-        // Prepare response
+        // NEW: Set real Google opaque tokens as secure HttpOnly cookies
+        // This ensures the payment controller gets valid opaque tokens for Google validation
+        res.cookie('access_token', tokens.access_token, {
+            httpOnly: true,  // Prevents JS access (secure)
+            secure: process.env.NODE_ENV === 'production',  // HTTPS only in prod
+            sameSite: 'strict',  // CSRF protection
+            maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000  // Match Google's expiry (~1h)
+        });
+        if (tokens.refresh_token) {
+            res.cookie('refresh_token', tokens.refresh_token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 7 * 24 * 3600 * 1000  // 7 days for refresh
+            });
+        }
+        logger.info('Set Google tokens in cookies', {
+            hasAccess: !!tokens.access_token,
+            hasRefresh: !!tokens.refresh_token,
+            accessExpiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'unknown',
+            clientIp
+        });
+
+        // Prepare response (no token in JSON to avoid exposure)
         const response = {
             message: 'Successfully authenticated with Google',
             user: {
@@ -128,16 +138,15 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
                 login_count: user?.login_count,
                 last_login: user?.last_login_at
             },
-            // In production, you would return a secure token instead
-            // token: generateJwtToken(user)
+            // Redirect to frontend or dashboard instead of just JSON
+            redirect: '/dashboard'  // Or your app's post-login page
         };
-
         logger.info('Google authentication completed successfully', {
             user_email: user?.email,
             user_id: user?.google_id
         });
-
-        res.json(response);
+        // NEW: Redirect instead of json to leverage cookies (or json if you prefer, but redirect is safer)
+        res.redirect(response.redirect);  // Change to res.json(response) if needed, but cookies are set either way
     } catch (error) {
         logger.error('Error in Google auth callback:', {
             error: error instanceof Error ? error.message : 'Unknown error',
