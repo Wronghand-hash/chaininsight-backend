@@ -3,7 +3,7 @@ import { version } from '../../package.json';
 
 const options: swaggerJsdoc.Options = {
     definition: {
-        openapi: '3.1.0',
+        openapi: '6.1.0',
         info: {
             title: 'ChainInsight API Documentation',
             version,
