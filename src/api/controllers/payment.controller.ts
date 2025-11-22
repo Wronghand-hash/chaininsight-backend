@@ -206,7 +206,11 @@ const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ t
     if (accessToken) {
         try {
             payload = await introspectGoogleToken(accessToken);
-            return { twitterId: payload.sub, email: payload.email }; // Map sub to twitterId
+            const { twitterId } = req.body;
+            if (!twitterId) {
+                throw new Error('Twitter ID is required in the request body');
+            }
+            return { twitterId, email: payload.email }; // Map sub to twitterId
         } catch (accessError: any) {
             logger.debug('Google access token invalid/expired, checking refresh token.', { accessError: accessError.message });
         }

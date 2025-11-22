@@ -82,7 +82,7 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 currentBalance = lamports / LAMPORTS_PER_SOL;
             } else if (chain === 'BSC') {
                 const balanceWei = await this.getBscBalanceWithRetry(address);
-                console.log("here getting bsc balance" , balanceWei)
+                console.log("here getting bsc balance", balanceWei)
                 if (balanceWei === undefined) {
                     logger.warn(`[Check] Skipping balance check for ${address} due to retries exceeded`);
                     return false;  // Treat as not confirmed for this check
@@ -129,23 +129,33 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
     ): Promise<void> {
         // Check if purchase already exists
         const checkPurchaseSql = `
-            SELECT count(*) as c 
-            FROM userPurchase 
-            WHERE twitterId = '${twitterId.replace(/'/g, "''")}' 
-            AND serviceType = '${serviceType.replace(/'/g, "''")}' 
-            AND address = '${address.replace(/'/g, "''")}';
-        `;
+        SELECT count(*) as c 
+        FROM userPurchase 
+        WHERE twitterId = '${twitterId.replace(/'/g, "''")}' 
+        AND serviceType = '${serviceType.replace(/'/g, "''")}' 
+        AND address = '${address.replace(/'/g, "''")}';
+    `;
         const checkRes: QueryResult = await questdbService.query(checkPurchaseSql);
         const exists = Number(checkRes.rows[0]?.[0]) > 0;
 
         if (!exists) {
+            // Get email from payment_history
+            const emailQuery = `
+            SELECT email FROM payment_history 
+            WHERE twitterId = '${twitterId.replace(/'/g, "''")}'
+            AND address = '${address.replace(/'/g, "''")}'
+            LIMIT 1;
+        `;
+            const emailResult = await questdbService.query(emailQuery);
+            const email = emailResult.rows[0]?.[0] || '';
+
             const now = new Date();
             const nowIso = now.toISOString();
-            
+
             // Set expiration based on service type
             let expireAt: Date;
             let totalPostsAllowed: number;
-            
+
             if (serviceType === 'oneDayPlan') {
                 expireAt = new Date(now.getTime() + (24 * 60 * 60 * 1000)); // 1 day
                 totalPostsAllowed = 336;
@@ -167,20 +177,22 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
                 created_at: nowIso,
                 expire_at: expireAtIso,
                 token,
-                twitter_community
+                twitter_community,
+                email  // Added email from payment_history
             };
 
             // Create user post plan
             const postPlanRow: Record<string, any> = {
                 twitter_id: twitterId,
-                username: '', // You might want to fetch the username from somewhere
+                username: '',
                 service_type: serviceType,
                 created_at: nowIso,
                 expire_at: expireAtIso,
                 total_posts_allowed: totalPostsAllowed,
                 total_posts_count: 0,
                 token,
-                twitter_community
+                twitter_community,
+                email  // Added email from payment_history
             };
 
             // Use a transaction to ensure both operations succeed or fail together
@@ -189,13 +201,12 @@ export class PaymentChecker {  // Renamed from SynchronousPaymentChecker
 
                 // Insert purchase record
                 await questdbService.insertBatch('userPurchase', [purchaseRow]);
-                
+
                 // Insert post plan
                 await questdbService.insertBatch('user_posts_plans', [postPlanRow]);
-                
+
                 await questdbService.query('COMMIT');
-                
-                logger.info(`💾 Added userPurchase and post plan for ${twitterId} (${serviceType}) with address ${address}`);
+                logger.info(`✅ Created purchase and post plan for ${twitterId} (${serviceType}) with ${totalPostsAllowed} posts allowed until ${expireAtIso}`);
                 logger.info(`📝 User ${twitterId} can post ${totalPostsAllowed} times until ${expireAtIso}`);
             } catch (error) {
                 await questdbService.query('ROLLBACK');
