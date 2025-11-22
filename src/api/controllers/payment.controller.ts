@@ -20,7 +20,6 @@ interface IntrospectionResponse {
 // Hardcoded Google endpoints for tokeninfo and userinfo
 const introspectGoogleToken = async (token: string): Promise<IntrospectionResponse> => {
     logger.debug('Starting Google token introspection', { tokenLength: token?.length || 0 });
-
     if (!token) {
         const errorMsg = 'Token is missing for introspection';
         logger.error(errorMsg);
@@ -31,35 +30,29 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
         tokenStart: token.substring(0, 10) + '...',
         tokenLength: token.length
     });
-
     // Explicitly reject JWTs to enforce Google opaque token validation
     if (token.split('.').length === 3) {
         const errorMsg = 'Invalid token type: JWT detected. Only Google opaque access tokens are supported for validation.';
         logger.error(errorMsg, { tokenStart: token.substring(0, 20) + '...' });
         throw new Error(errorMsg);
     }
-
     const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
     if (!CLIENT_ID) {
         const errorMsg = 'Missing environment variable: GOOGLE_CLIENT_ID';
         logger.error(errorMsg);
         throw new Error(errorMsg);
     }
-
     try {
         logger.debug('Initiating tokeninfo request to Google', {
             hasClientId: !!CLIENT_ID,
             tokenStart: token.substring(0, 5) + '...' + token.substring(token.length - 5)
         });
-
         // Step 1: Call tokeninfo for metadata (exp, scope, aud) - hardcoded URL
         const tokenInfoUrl = `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`;
         logger.debug('Fetching token info', { url: tokenInfoUrl });
-
         const tokenInfoResponse = await fetch(tokenInfoUrl);
         const responseStatus = tokenInfoResponse.status;
         const responseStatusText = tokenInfoResponse.statusText;
-
         if (!tokenInfoResponse.ok) {
             const errorText = await tokenInfoResponse.text();
             const errorMsg = `Tokeninfo failed: HTTP ${responseStatus} - ${responseStatusText}`;
@@ -70,7 +63,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error(errorMsg);
         }
-
         const tokenInfo: any = await tokenInfoResponse.json();
         logger.debug('Received token info', {
             tokenInfo: {
@@ -80,7 +72,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
                 expiresIn: tokenInfo.exp ? `${tokenInfo.exp * 1000 - Date.now()}ms` : 'unknown'
             }
         });
-
         // Validate tokeninfo fields
         if (tokenInfo.aud !== CLIENT_ID) {
             const errorMsg = `Token audience mismatch: expected ${CLIENT_ID}, got ${tokenInfo.aud}`;
@@ -90,7 +81,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error(errorMsg);
         }
-
         const tokenExpiration = tokenInfo.exp * 1000;
         const currentTime = Date.now();
         if (tokenExpiration < currentTime) {
@@ -101,7 +91,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error('Token expired.');
         }
-
         if (!tokenInfo.scope?.includes('userinfo.email') && !tokenInfo.scope?.includes('payments')) {
             const errorMsg = `Token lacks required scope. Has: ${tokenInfo.scope || 'none'}`;
             logger.error(errorMsg, {
@@ -110,7 +99,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error('Token lacks required scope (e.g., userinfo.email or payments).');
         }
-
         // Step 2: Call userinfo for user data (validates token implicitly) - UPDATED URL to OpenID Connect standard
         logger.debug('Fetching user info from Google');
         const userInfoResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {  // FIXED: Correct endpoint
@@ -118,7 +106,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
                 'Authorization': `Bearer ${token}`  // Only Bearer needed (no Content-Type for GET)
             }
         });
-
         if (!userInfoResponse.ok) {
             const errorText = await userInfoResponse.text();
             const errorMsg = `Userinfo failed (token invalid): HTTP ${userInfoResponse.status}`;
@@ -129,18 +116,15 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error(errorMsg);
         }
-
         const userInfo: any = await userInfoResponse.json();
         // NEW: Log full response for debugging (remove after confirming fix)
         logger.debug('Full userinfo response', userInfo);
-
         logger.debug('Received user info', {
             userId: userInfo.sub,
             email: userInfo.email,
             emailVerified: userInfo.email_verified,
             hasPicture: !!userInfo.picture
         });
-
         // Validate userinfo
         if (!userInfo.email || !userInfo.sub || !userInfo.email_verified) {
             const errorMsg = 'Invalid userinfo: Missing required fields';
@@ -151,7 +135,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             });
             throw new Error('Invalid userinfo: Missing email, sub, or email_verified.');
         }
-
         const payload: IntrospectionResponse = {
             sub: userInfo.sub,
             email: userInfo.email,
@@ -161,7 +144,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             exp: tokenInfo.exp,
             // twitterId: fetch from DB if needed, e.g., await getTwitterIdFromSub(userInfo.sub)
         };
-
         logger.info('Google token successfully introspected', {
             email: payload.email,
             sub: payload.sub,
@@ -169,7 +151,6 @@ const introspectGoogleToken = async (token: string): Promise<IntrospectionRespon
             scopes: payload.scope.split(' '),
             expiresIn: `${payload.exp * 1000 - Date.now()}ms`
         });
-
         return payload;
     } catch (error: any) {
         logger.error('Google introspection failed', { error: error.message, tokenLength: token.length });
@@ -188,16 +169,29 @@ const isValidChain = (chain: any): chain is Chain => {
 // Updated for Google: Uses hardcoded endpoints, maps sub to twitterId
 // Accepts res for setting new cookies on refresh
 const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ twitterId: string, email: string }> => {
-    const accessToken = req.cookies?.access_token;
-    const refreshToken = req.cookies?.refresh_token;
+    const accessToken = req.cookies?.google_access_token;
+    const refreshToken = req.cookies?.google_refresh_token;
+
+    // ENHANCED DEBUGGING: Log presence and lengths of both tokens early
+    logger.info('Cookie token check', {
+        hasAccess: !!accessToken,
+        hasRefresh: !!refreshToken,
+        accessLength: accessToken?.length || 0,
+        refreshLength: refreshToken?.length || 0,
+        accessStart: accessToken ? accessToken.substring(0, 20) + '...' : 'N/A',
+        refreshStart: refreshToken ? refreshToken.substring(0, 20) + '...' : 'N/A'
+    });
+
     if (!accessToken && !refreshToken) {
-        throw new Error('Authentication required: Access or Refresh token missing from cookies.');
+        const errorMsg = 'Authentication required: Access or Refresh token missing from cookies.';
+        logger.error(errorMsg);
+        throw new Error(errorMsg);
     }
     if (accessToken) {
-        logger.info('Google access token found in cookies.', { accessToken: accessToken.substring(0, 20) + '...' });
+        logger.info('Google access token found in cookies.', { google_access_token: accessToken.substring(0, 20) + '...' });
     }
     if (refreshToken) {
-        logger.info('Google refresh token found in cookies.', { refreshToken: refreshToken.substring(0, 20) + '...' });
+        logger.info('Google refresh token found in cookies.', { google_refresh_token: refreshToken.substring(0, 20) + '...' });
     }
 
     let payload: IntrospectionResponse;
@@ -208,28 +202,42 @@ const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ t
             payload = await introspectGoogleToken(accessToken);
             const { twitterId } = req.body;
             if (!twitterId) {
-                throw new Error('Twitter ID is required in the request body');
+                const errorMsg = 'Twitter ID is required in the request body';
+                logger.error(errorMsg);
+                throw new Error(errorMsg);
             }
+            logger.debug('Access token validation succeeded; no refresh needed.', { twitterId, email: payload.email });
             return { twitterId, email: payload.email }; // Map sub to twitterId
         } catch (accessError: any) {
-            logger.debug('Google access token invalid/expired, checking refresh token.', { accessError: accessError.message });
+            logger.debug('Google access token invalid/expired, attempting refresh token path.', { accessError: accessError.message });
         }
     }
 
     // 2. Refresh token path (requires res for new cookies)
     if (refreshToken) {
+        logger.debug('Entering refresh token exchange flow.', { refreshTokenLength: refreshToken.length });
         if (!res) {
-            throw new Error('Response object required for token refresh.');
+            const errorMsg = 'Response object required for token refresh.';
+            logger.error(errorMsg);
+            throw new Error(errorMsg);
         }
         const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
         const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
         // Hardcoded Google token endpoint
         const AUTH_REFRESH_URL = 'https://oauth2.googleapis.com/token';
         if (!CLIENT_ID || !CLIENT_SECRET) {
-            throw new Error('Missing env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.');
+            const errorMsg = 'Missing env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.';
+            logger.error(errorMsg);
+            throw new Error(errorMsg);
         }
-
         try {
+            // ENHANCED DEBUGGING: Log env vars presence (without values)
+            logger.debug('Refresh token exchange setup', {
+                hasClientId: !!CLIENT_ID,
+                hasClientSecret: !!CLIENT_SECRET,
+                refreshTokenStart: refreshToken.substring(0, 20) + '...'
+            });
+
             // Directly exchange refresh token (no introspection for refresh)
             const refreshResponse = await fetch(AUTH_REFRESH_URL, {
                 method: 'POST',
@@ -243,41 +251,97 @@ const validateAndExtractUser = async (req: Request, res?: Response): Promise<{ t
                 }).toString()
             });
 
+            // ENHANCED DEBUGGING: Log full refresh response details
+            const responseStatus = refreshResponse.status;
+            const responseStatusText = refreshResponse.statusText;
+            logger.debug('Refresh token response received', {
+                status: responseStatus,
+                statusText: responseStatusText,
+                ok: refreshResponse.ok
+            });
+
             if (!refreshResponse.ok) {
                 const errorText = await refreshResponse.text();
-                throw new Error(`Google refresh failed: HTTP ${refreshResponse.status} - ${errorText}`);
+                const errorMsg = `Google refresh failed: HTTP ${responseStatus} - ${responseStatusText}`;
+                logger.error(errorMsg, {
+                    status: responseStatus,
+                    statusText: responseStatusText,
+                    errorDetails: errorText,
+                    clientId: CLIENT_ID.substring(0, 10) + '...' // Partial for security
+                });
+                throw new Error(errorMsg);
             }
 
-            const { access_token: newAccessToken, refresh_token: newRefreshToken } = await refreshResponse.json();
+            const refreshData: any = await refreshResponse.json();
+            const { access_token: newAccessToken, refresh_token: newRefreshToken } = refreshData;
+
+            // ENHANCED DEBUGGING: Log new tokens (partial)
+            logger.debug('Refresh successful; new tokens issued', {
+                newAccessLength: newAccessToken?.length || 0,
+                newRefreshLength: newRefreshToken?.length || 0,
+                newAccessStart: newAccessToken ? newAccessToken.substring(0, 20) + '...' : 'N/A',
+                newRefreshPresent: !!newRefreshToken,
+                expiresIn: refreshData.expires_in || 'N/A'
+            });
+
+            if (!newAccessToken) {
+                const errorMsg = 'Refresh succeeded but no new access token returned.';
+                logger.error(errorMsg, { refreshDataKeys: Object.keys(refreshData) });
+                throw new Error(errorMsg);
+            }
 
             // Now introspect the NEW access token to get user data
+            logger.debug('Introspecting new access token from refresh.');
             payload = await introspectGoogleToken(newAccessToken);
 
             // Set new tokens in secure HttpOnly cookies
-            res.cookie('access_token', newAccessToken, {
+            res.cookie('google_access_token', newAccessToken, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 3600 * 1000 // 1 hour
             });
+            logger.debug('New access token cookie set.', { maxAge: 3600 * 1000 });
+
             if (newRefreshToken) {
-                res.cookie('refresh_token', newRefreshToken, {  // FIXED: res.cookie (was res.cookies in some versions)
+                res.cookie('google_refresh_token', newRefreshToken, {  // FIXED: res.cookie (was res.cookies in some versions)
                     httpOnly: true,
                     secure: process.env.NODE_ENV === 'production',
                     sameSite: 'strict',
                     maxAge: 7 * 24 * 3600 * 1000 // 7 days
                 });
+                logger.debug('New refresh token cookie set.', { maxAge: 7 * 24 * 3600 * 1000 });
+            } else {
+                logger.warn('Refresh issued new access but no new refresh token; continuing with old one.');
             }
 
-            logger.info('Google refresh successful; new access token issued.');
-            return { twitterId: payload.sub, email: payload.email };
+            logger.info('Google refresh successful; new access token issued and cookies updated.', {
+                email: payload.email,
+                sub: payload.sub,
+                newAccessExpiresIn: `${payload.exp * 1000 - Date.now()}ms`
+            });
+
+            const { twitterId } = req.body;
+            if (!twitterId) {
+                const errorMsg = 'Twitter ID is required in the request body';
+                logger.error(errorMsg);
+                throw new Error(errorMsg);
+            }
+            return { twitterId, email: payload.email };
         } catch (refreshError: any) {
-            logger.debug('Google refresh token invalid/expired.', { refreshError: refreshError.message });
+            logger.error('Google refresh token exchange failed', {
+                refreshError: refreshError.message,
+                refreshTokenLength: refreshToken.length,
+                hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET
+            });
             throw new Error('Session expired or refresh token invalid. Please log in again.');
         }
     }
 
-    throw new Error('Authentication failed: Both tokens invalid.');
+    // If we reach here, no valid access and no refresh available
+    const errorMsg = 'Authentication failed: Both tokens invalid.';
+    logger.error(errorMsg, { hasAccess: !!accessToken, hasRefresh: !!refreshToken });
+    throw new Error(errorMsg);
 };
 
 const generateWalletKeypair = async (req: Request, res: Response): Promise<void> => {
@@ -290,11 +354,11 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
     } catch (error: any) {
         // Unauthorized access: tokens are invalid or missing
         logger.warn('Token validation failed for wallet generation', { error: error.message });
-        res.status(401).json({ error: error.message });
+        res.status(401).json({ error: error.message, redirectToLogin: error.message.includes('Both tokens invalid') || error.message.includes('refresh token invalid') });
         return;
     }
     const twitterId = validatedUser.twitterId; // Use validated ID (now from Google sub)
-    const email = validatedUser.email;     // Use validated email
+    const email = validatedUser.email;      // Use validated email
     if (!chain || amount === undefined || !wallet || !token || !twitter_community) {
         logger.warn('Missing required body parameters for wallet generation', req.body);
         res.status(400).json({ error: 'Missing required parameters: chain, amount, wallet, token, and twitter_community are required in the request body.' });
@@ -349,7 +413,7 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
     } catch (error: any) {
         // Unauthorized access: tokens are invalid or missing
         logger.warn('Token validation failed for status check', { error: error.message });
-        res.status(401).json({ error: error.message });
+        res.status(401).json({ error: error.message, redirectToLogin: error.message.includes('Both tokens invalid') || error.message.includes('refresh token invalid') });
         return;
     }
     const twitterId = validatedUser.twitterId; // Use validated ID (now from Google sub)

@@ -102,14 +102,14 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
 
         // NEW: Set real Google opaque tokens as secure HttpOnly cookies
         // This ensures the payment controller gets valid opaque tokens for Google validation
-        res.cookie('access_token', tokens.access_token, {
+        res.cookie('google_access_token', tokens.access_token, {
             httpOnly: true,  // Prevents JS access (secure)
             secure: process.env.NODE_ENV === 'production',  // HTTPS only in prod
             sameSite: 'strict',  // CSRF protection
             maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000  // Match Google's expiry (~1h)
         });
         if (tokens.refresh_token) {
-            res.cookie('refresh_token', tokens.refresh_token, {
+            res.cookie('google_refresh_token', tokens.refresh_token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',
