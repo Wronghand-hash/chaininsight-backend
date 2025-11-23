@@ -448,11 +448,36 @@ class TokenMetricsDexscreenerPoller {
               const dexLink = `https://dexscreener.com/solana/${item.contract}`;
               // 5-minute volume alert
               if (run5MinAlert && volume5m > 0) {
-                const tweetText = `🎉 5MIN VOLUME ALERT! �
-💸 5-min buy VOL: $${(volume5m / 1000).toFixed(0)}k on $${baseTokenSymbol} 🔥
-� CA: ${item.contract}
-� [Live Chart](${dexLink})
-Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
+                const formattedVolume = volume5m >= 1000000
+                  ? `$${(volume5m / 1000000).toFixed(1)}M`
+                  : `$${(volume5m / 1000).toFixed(0)}k`;
+                const openingLines = [
+                  '🎉 5-MIN VOLUME ALERT! 🚀',
+                  '⚡️ FRESH 5-MIN SPIKE!',
+                  '🔥 5-MIN BUYING DETECTED!',
+                  '🚨 JUST HIT 5-MIN VOLUME!'
+                ];
+                const volumeLines = [
+                  `💸 5-min buy VOL: ${formattedVolume} on $${baseTokenSymbol} 🔥`,
+                  `💰 ${formattedVolume} bought in last 5-min → $${baseTokenSymbol}`,
+                  `🟢 ${formattedVolume} volume in 5-min on $${baseTokenSymbol}`,
+                  `🟢 5-min buys: ${formattedVolume} → $${baseTokenSymbol}`
+                ];
+                const chartLines = [
+                  `📈 DexScreener → ${dexLink}`,
+                  `📊 Live Chart → ${dexLink}`
+                ];
+                const footerLines = [
+                  'Auto-posted by @DEXAlerts_io | NFA | DYOR | Community-run',
+                  'Powered by @DEXAlerts_io | NFA | DYOR | Community-run',
+                  'Auto-sent by @DEXAlerts_io | NFA | DYOR | Community-run'
+                ];
+                const openingLine = openingLines[Math.floor(Math.random() * openingLines.length)];
+                const volumeLine = volumeLines[Math.floor(Math.random() * volumeLines.length)];
+                const chartLine = chartLines[Math.floor(Math.random() * chartLines.length)];
+                const footerLine = footerLines[Math.floor(Math.random() * footerLines.length)];
+                const caLine = `🔗 CA: ${item.contract}`;
+                const tweetText = `${openingLine}\n${volumeLine}\n${caLine}\n${chartLine}\n${footerLine}`;
                 logger.info(`[5min Alert] Attempting to post for ${baseTokenSymbol}`);
                 const posted = await this.postAlert(tweetText, item.contract, item.chain);
                 if (posted) {
@@ -467,15 +492,33 @@ Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
                 const formattedVolume = volume1h >= 1000000
                   ? `$${(volume1h / 1000000).toFixed(1)}M`
                   : `$${(volume1h / 1000).toFixed(0)}k`;
-                const tweetText = `🎉 1H VOLUME ALERT! 🚀
-` +
-                  `� 1-hour VOL: ${formattedVolume} on $${baseTokenSymbol} 🔥
-` +
-                  `� CA: ${item.contract}
-` +
-                  `📊 [Live Chart](${dexLink})
-` +
-                  `Auto-posted by @DEXAlerts | NFA | DYOR | Community-run`;
+                const openingLines = [
+                  '🕐 1-HOUR VOLUME ALERT!',
+                  '📊 1H TOTAL VOLUME JUST IN!',
+                  '🔥 1-HOUR VOLUME REPORT!',
+                  '🚀 1H VOLUME UPDATE!'
+                ];
+                const volumeLines = [
+                  `💰 1h volume: ${formattedVolume} on $${baseTokenSymbol}`,
+                  `📈 ${formattedVolume} traded in last hour → $${baseTokenSymbol}`,
+                  `🟢 1-hour total volume: ${formattedVolume} for $${baseTokenSymbol}`,
+                  `🟢 1h buys + sells: ${formattedVolume} → $${baseTokenSymbol}`
+                ];
+                const chartLines = [
+                  `📈 DexScreener → ${dexLink}`,
+                  `📊 Live Chart → ${dexLink}`
+                ];
+                const footerLines = [
+                  'Auto-posted by @DEXAlerts_io | NFA | DYOR | Community-run',
+                  'Powered by @DEXAlerts_io | NFA | DYOR | Community-run',
+                  'Auto-sent by @DEXAlerts_io | NFA | DYOR | Community-run'
+                ];
+                const openingLine = openingLines[Math.floor(Math.random() * openingLines.length)];
+                const volumeLine = volumeLines[Math.floor(Math.random() * volumeLines.length)];
+                const chartLine = chartLines[Math.floor(Math.random() * chartLines.length)];
+                const footerLine = footerLines[Math.floor(Math.random() * footerLines.length)];
+                const caLine = `🔗 CA: ${item.contract}`;
+                const tweetText = `${openingLine}\n${volumeLine}\n${caLine}\n${chartLine}\n${footerLine}`;
                 logger.info(`[1h Alert] Attempting to post for ${baseTokenSymbol}`);
                 const posted = await this.postAlert(tweetText, item.contract, item.chain);
                 if (posted) {
