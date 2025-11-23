@@ -53,6 +53,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         logger.info('Fetching user info from Google...', { clientIp });
         const userInfoResponse: any = await usersService.getGoogleUserInfo(tokens);
         const userInfo = userInfoResponse.data as GoogleUserInfo;
+        console.log(userInfo, "where the fail happens ")
         // Log additional user info for debugging
         const userInfoLog = {
             userId: userInfo.sub,

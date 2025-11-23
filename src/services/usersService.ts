@@ -114,7 +114,7 @@ export class UsersService {
             const userInfo = await googleClient.request({
                 url: 'https://www.googleapis.com/oauth2/v3/userinfo'
             });
-            return userInfo.data; // The library response has data property
+            return userInfo; // The library response has data property
         } catch (error) {
             logger.error('Error getting Google user info:', error);
             throw new Error('Failed to get user info from Google');
