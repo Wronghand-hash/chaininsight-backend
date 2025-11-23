@@ -78,8 +78,8 @@ export class QuestDBService {
       ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`;
     await this.pgClient.query(kolTradesCreateSql);
     logger.debug(`✅ Table created: kol_trades`);
-    // users table
-    const usersCreateSql = `CREATE TABLE IF NOT EXISTS users (
+    // google_users table
+    const usersCreateSql = `CREATE TABLE IF NOT EXISTS google_users (
         created_at TIMESTAMP,
         username STRING,
         email SYMBOL,
@@ -104,10 +104,10 @@ export class QuestDBService {
         email_verified BOOLEAN
       ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`;
     await this.pgClient.query(usersCreateSql);
-    logger.debug(`✅ Table created: users`);
+    logger.debug(`✅ Table created: google_users`);
 
-    // Ensure all columns exist in the users table
-    await this.ensureUsersTableColumns();
+    // Ensure all columns exist in the google_users table
+    await this.ensureGoogleUsersTableColumns();
     // Other tables
     const tables = [
       {
@@ -298,8 +298,8 @@ export class QuestDBService {
     if (rows.length === 0) return;
     try {
       for (const row of rows) {
-        // Special handling for users table (upsert on email)
-        if (table === 'users') {
+        // Special handling for google_users table (upsert on email)
+        if (table === 'google_users') {
           const nowIso = new Date().toISOString();
           const createdAt = row.created_at || nowIso;
           const username = String(row.username || '');
@@ -308,14 +308,14 @@ export class QuestDBService {
           const twitterAddresses = JSON.stringify(row.twitter_addresses || []);
           const updatedAt = row.updated_at || nowIso;
           // Check if user exists by email
-          const checkSql = `SELECT count(*) as c FROM users WHERE email = $1;`;
+          const checkSql = `SELECT count(*) as c FROM google_users WHERE email = $1;`;
           const checkRes = await this.pgClient.query(checkSql, [email]);
           const exists = checkRes.rows[0]?.c > 0;
           if (exists) {
             // Update existing user
             const esc = (s: string) => s.replace(/'/g, "''");
             const updateSql = `
-              UPDATE users
+              UPDATE google_users
               SET username = '${esc(username)}',
                   verified = ${verified},
                   updated_at = '${updatedAt}',
@@ -325,7 +325,7 @@ export class QuestDBService {
             await this.pgClient.query(updateSql);
           } else {
             // Insert new user
-            const insertSql = `INSERT INTO users (created_at, username, email, verified, updated_at, twitter_addresses) VALUES ($1, $2, $3, $4, $5, $6);`;
+            const insertSql = `INSERT INTO google_users (created_at, username, email, verified, updated_at, twitter_addresses) VALUES ($1, $2, $3, $4, $5, $6);`;
             await this.pgClient.query(insertSql, [createdAt, username, email, verified, updatedAt, twitterAddresses]);
           }
           continue;
@@ -600,7 +600,7 @@ export class QuestDBService {
     const res = await this.query(sql);
     return res.rows[0] || null;
   }
-  private async ensureUsersTableColumns(): Promise<void> {
+  private async ensureGoogleUsersTableColumns(): Promise<void> {
     try {
       const columnsToAdd = [
         { name: 'google_id', type: 'STRING' },
@@ -623,13 +623,13 @@ export class QuestDBService {
       // Check each column and add if it doesn't exist
       for (const column of columnsToAdd) {
         try {
-          const checkSql = `SELECT * FROM table_columns('users') WHERE column = '${column.name}'`;
+          const checkSql = `SELECT * FROM table_columns('google_users') WHERE column = '${column.name}'`;
           const result = await this.pgClient.query(checkSql);
 
           if (result.rows.length === 0) {
-            const addColumnSql = `ALTER TABLE users ADD COLUMN ${column.name} ${column.type}`;
+            const addColumnSql = `ALTER TABLE google_users ADD COLUMN ${column.name} ${column.type}`;
             await this.pgClient.query(addColumnSql);
-            logger.debug(`✅ Added column '${column.name}' to users table`);
+            logger.debug(`✅ Added column '${column.name}' to google_users table`);
           }
         } catch (error) {
           logger.warn(`Could not check/add column '${column.name}':`, error);
@@ -638,7 +638,7 @@ export class QuestDBService {
 
       // Set default values
       await this.pgClient.query(`
-        UPDATE users
+        UPDATE google_users
         SET
           login_count = COALESCE(login_count, 0),
           sign_in_count = COALESCE(sign_in_count, 0),
@@ -652,7 +652,7 @@ export class QuestDBService {
       `);
 
     } catch (error) {
-      logger.error('Error ensuring users table columns:', error);
+      logger.error('Error ensuring google_users table columns:', error);
     }
   }
   async close(): Promise<void> {

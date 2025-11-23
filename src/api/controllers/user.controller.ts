@@ -1,8 +1,7 @@
 // src/api/controllers/user.controller.ts
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, CookieOptions } from 'express';
 import { usersService, getGoogleAuthUrl, GoogleUserInfo } from '../../services/usersService';
 import { logger } from '../../utils/logger';
-
 // Extend Express Request type to include user
 declare global {
     namespace Express {
@@ -11,7 +10,6 @@ declare global {
         }
     }
 }
-
 // Google OAuth2 flow
 export const googleAuthInit = (req: Request, res: Response) => {
     try {
@@ -22,7 +20,6 @@ export const googleAuthInit = (req: Request, res: Response) => {
         res.status(500).json({ error: 'Failed to initialize Google authentication' });
     }
 };
-
 // Google OAuth2 callback
 // Google OAuth2 callback
 export const googleAuthCallback = async (req: Request, res: Response, next: NextFunction) => {
@@ -100,35 +97,28 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             clientIp
         };
         logger.info('User processed successfully', userLogData);
-
-        // UPDATED: Set real Google opaque tokens as secure HttpOnly cookies
-        // This ensures the payment controller gets valid opaque tokens for Google validation
-        // For cross-domain testing (frontend/backend on different domains), set sameSite: 'none'
-        // and secure: false (for HTTP/local dev). In production, use secure: true and HTTPS.
-        // Ensure frontend requests include withCredentials: true and backend CORS allows credentials.
-        res.cookie('google_access_token', tokens.access_token, {
-            httpOnly: true,  // Prevents JS access (secure)
-            secure: false,   // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
-            sameSite: 'none', // Allow cross-site requests (required for different domains)
-            maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000  // Match Google's expiry (~1h)
-        });
+        const cookieOptions: CookieOptions = {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'none',
+            maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000
+        };
+        res.cookie('google_access_token', tokens.access_token, cookieOptions);
         if (tokens.refresh_token) {
-            res.cookie('google_refresh_token', tokens.refresh_token, {
-                httpOnly: true,
-                secure: false,  // Set to false for cross-domain testing over HTTP; true in prod with HTTPS
-                sameSite: 'none', // Allow cross-site requests (required for different domains)
+            const refreshOptions: CookieOptions = {
+                ...cookieOptions,
                 maxAge: 7 * 24 * 3600 * 1000  // 7 days for refresh
-            });
+            };
+            res.cookie('google_refresh_token', tokens.refresh_token, refreshOptions);
         }
         logger.info('Set Google tokens in cookies', {
             hasAccess: !!tokens.access_token,
             hasRefresh: !!tokens.refresh_token,
             accessExpiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'unknown',
-            clientIp
+            clientIp,
+            cookieOptions: { secure: cookieOptions.secure, sameSite: cookieOptions.sameSite }
         });
-
         console.log(user?.picture, userInfo.picture, "picutre")
-
         // Prepare user data for URL parameters with manual query string construction
         const params = [];
         if (user?.email) params.push(`email=${encodeURIComponent(user.email)}`);
@@ -137,18 +127,15 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             // Add picture URL as-is without additional encoding
             params.push(`picture=${userInfo.picture}`);
         }
-
         // Create redirect URL with user data as query parameters
         const redirectBase = '/dashboard';
         const queryString = params.length > 0 ? `?${params.join('&')}` : '';
         const redirectUrl = `${redirectBase}${queryString}`;
-
         logger.info('Google authentication completed successfully', {
             user_email: user?.email,
             user_id: user?.google_id,
             redirect_url: redirectUrl
         });
-
         // Redirect with user data in query parameters
         res.redirect(redirectUrl);
     } catch (error) {
@@ -159,27 +146,20 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         next(error);
     }
 };
-
 // Logout user
 export const logoutUser = (req: Request, res: Response) => {
     try {
-        // Clear Google auth cookies
-        res.clearCookie('google_access_token', {
+        // Clear Google auth cookies - match the options used when setting
+        const clearOptions: CookieOptions = {
             httpOnly: true,
-            secure: false,  // Should match the settings used when setting the cookie
-            sameSite: 'none'
-        });
-
-        res.clearCookie('google_refresh_token', {
-            httpOnly: true,
-            secure: false,  // Should match the settings used when setting the cookie
-            sameSite: 'none'
-        });
-
+            secure: false,  // Match dev settings; true in prod
+            sameSite: 'lax' // Match dev settings; 'none' in prod
+        };
+        res.clearCookie('google_access_token', clearOptions);
+        res.clearCookie('google_refresh_token', clearOptions);
         logger.info('User logged out successfully', {
             clientIp: req.ip || req.socket.remoteAddress || 'unknown'
         });
-
         res.status(200).json({
             success: true,
             message: 'Successfully logged out'
@@ -195,25 +175,19 @@ export const logoutUser = (req: Request, res: Response) => {
         });
     }
 };
-
 // Verify Google ID token (for client-side auth)
 export const verifyGoogleToken = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { idToken } = req.body;
-
         if (!idToken) {
             return res.status(400).json({ error: 'ID token is required' });
         }
-
         const payload = await usersService.verifyGoogleToken(idToken);
-
         // Ensure required fields are present
         if (!payload?.email) {
             return res.status(400).json({ error: 'Invalid ID token: email is required' });
         }
-
         const clientIp = req.ip || req.socket.remoteAddress || '';
-
         const user = await usersService.findOrCreateGoogleUser({
             sub: payload.sub || '',
             email: payload.email,  // This is now guaranteed to be a string
@@ -231,7 +205,6 @@ export const verifyGoogleToken = async (req: Request, res: Response, next: NextF
             login_count: 0,
             sign_in_count: 0
         });
-
         res.json({
             success: true,
             user: {
@@ -247,21 +220,18 @@ export const verifyGoogleToken = async (req: Request, res: Response, next: NextF
         next(error);
     }
 };
-
 // Get current user
 export const getCurrentUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
         if (!req.user) {
             return res.status(401).json({ error: 'Not authenticated' });
         }
-
         res.json({ user: req.user });
     } catch (error) {
         logger.error('Error getting current user:', error);
         next(error);
     }
 };
-
 export const getCurrentUserProfile = async (req: Request, res: Response, next: NextFunction) => {
     try {
         // Get the access token from cookies
@@ -271,7 +241,6 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
         if (!accessToken) {
             return res.status(401).json({ error: 'No access token provided' });
         }
-
         const user = await usersService.getCurrentUser(accessToken, refreshToken);
         res.json(user);
     } catch (error: any) {
@@ -295,16 +264,13 @@ export const handleAuthError = (error: Error, req: Request, res: Response, next:
     }
     next(error);
 };
-
 // Export all auth-related routes
 export const authRoutes = (router: any) => {
     // Google OAuth flow
     router.get('/auth/google', googleAuthInit);
     router.get('/auth/google/callback', googleAuthCallback);
-
     // Token verification (for client-side auth)
     router.post('/auth/google/verify', verifyGoogleToken);
-
     // Get current user
     router.get('/auth/me', getCurrentUser);
 };
