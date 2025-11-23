@@ -51,7 +51,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
         });
         // Get user info from Google
         logger.info('Fetching user info from Google...', { clientIp });
-        const userInfoResponse = await usersService.getGoogleUserInfo(tokens);
+        const userInfoResponse: any = await usersService.getGoogleUserInfo(tokens);
         const userInfo = userInfoResponse.data as GoogleUserInfo;
         // Log additional user info for debugging
         const userInfoLog = {
@@ -265,11 +265,12 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
     try {
         // Get the access token from cookies
         const accessToken = req.cookies?.google_access_token;
+        const refreshToken = req.cookies?.google_refresh_token
         if (!accessToken) {
             return res.status(401).json({ error: 'No access token provided' });
         }
 
-        const user = await usersService.getCurrentUser(accessToken);
+        const user = await usersService.getCurrentUser(accessToken, refreshToken);
         res.json(user);
     } catch (error: any) {
         logger.error('Error in getCurrentUserProfile:', error);

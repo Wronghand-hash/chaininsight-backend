@@ -1,8 +1,10 @@
 import { OAuth2Client } from 'google-auth-library';
-import { Request, Response } from 'express';
 import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
 
+/**
+ * Interface for Google's user information payload.
+ */
 export interface GoogleUserInfo {
     sub: string;
     email: string;
@@ -10,30 +12,14 @@ export interface GoogleUserInfo {
     picture?: string;
     email_verified?: boolean;
     locale?: string;
-    hd?: string;  // The hosted domain of the user's G Suite account
+    hd?: string;
     given_name?: string;
     family_name?: string;
 }
 
-// Initialize OAuth2 client with credentials
-const googleClient = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI // e.g., 'http://localhost:3000/api/auth/google/callback'
-);
-
-// Generate Google OAuth URL
-export const getGoogleAuthUrl = (): string => {
-    return googleClient.generateAuthUrl({
-        access_type: 'offline',
-        scope: [
-            'https://www.googleapis.com/auth/userinfo.profile',
-            'https://www.googleapis.com/auth/userinfo.email'
-        ],
-        prompt: 'consent' // Force to get refresh token every time
-    });
-};
-
+/**
+ * Interface for a User object stored in the database.
+ */
 export interface User {
     username: string;
     email: string;
@@ -59,8 +45,36 @@ export interface User {
     email_verified?: boolean;
 }
 
+// Initialize OAuth2 client with credentials
+const googleClient = new OAuth2Client(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+);
+
+/**
+ * Generates the Google OAuth URL for sign-in.
+ * @returns The Google authorization URL.
+ */
+export const getGoogleAuthUrl = (): string => {
+    return googleClient.generateAuthUrl({
+        access_type: 'offline',
+        scope: [
+            'https://www.googleapis.com/auth/userinfo.profile',
+            'https://www.googleapis.com/auth/userinfo.email'
+        ],
+        prompt: 'consent' // Force to get refresh token
+    });
+};
+
 export class UsersService {
-    // Verify Google ID token
+    // --- Google OAuth Methods ---
+
+    /**
+     * Verifies a Google ID token.
+     * @param idToken The ID token from Google.
+     * @returns The token payload.
+     */
     async verifyGoogleToken(idToken: string) {
         try {
             const ticket = await googleClient.verifyIdToken({
@@ -69,12 +83,16 @@ export class UsersService {
             });
             return ticket.getPayload();
         } catch (error) {
-            logger.error('Google token verification failed:', error);
+            logger.error('Google ID token verification failed:', error);
             throw new Error('Invalid Google token');
         }
     }
 
-    // Exchange authorization code for tokens
+    /**
+     * Exchanges an authorization code for access and refresh tokens.
+     * @param code The authorization code from Google redirect.
+     * @returns The tokens object.
+     */
     async getGoogleTokens(code: string) {
         try {
             const { tokens } = await googleClient.getToken(code);
@@ -85,143 +103,168 @@ export class UsersService {
         }
     }
 
-    // Get user info from Google
+    /**
+     * Retrieves user profile information from Google.
+     * @param tokens The access and refresh tokens.
+     * @returns The user info object from Google.
+     */
     async getGoogleUserInfo(tokens: any) {
         try {
-            // Set the credentials on the client
             googleClient.setCredentials(tokens);
-
-            // Get the user info using the OAuth2 client
             const userInfo = await googleClient.request({
                 url: 'https://www.googleapis.com/oauth2/v3/userinfo'
             });
-
-            return userInfo;
+            return userInfo.data; // The library response has data property
         } catch (error) {
             logger.error('Error getting Google user info:', error);
             throw new Error('Failed to get user info from Google');
         }
     }
 
-    // Find or create user based on Google profile
-    async findOrCreateGoogleUser(googleUser: GoogleUserInfo & {
-        access_token?: string;
-        refresh_token?: string;
-        token_expiry?: string;
-        last_login_at?: string;
-        login_count?: number;
-        current_sign_in_ip?: string;
-        last_sign_in_ip?: string;
-        sign_in_count?: number;
-    }) {
+    /**
+     * Validates a Google access token and returns user info.
+     * @param token The Google access token.
+     * @returns The user info payload.
+     */
+    private async introspectGoogleToken(token: string): Promise<any> {
+        if (!token) {
+            throw new Error('Token is missing for introspection');
+        }
+        const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+        if (!CLIENT_ID) {
+            throw new Error('Missing environment variable: GOOGLE_CLIENT_ID');
+        }
+
         try {
-            if (!googleUser.sub || !googleUser.email) {
-                throw new Error('Google user ID and email are required');
+            // Use the tokeninfo endpoint to validate and get basic info
+            const tokenInfoUrl = `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token)}`;
+            const tokenInfoResponse = await fetch(tokenInfoUrl, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            const responseText = await tokenInfoResponse.text();
+
+            if (!tokenInfoResponse.ok) {
+                // Token is invalid/expired, throw error to trigger refresh flow in getCurrentUser
+                throw new Error(`Token validation failed: ${responseText}`);
             }
 
-            // Prepare user data
-            const userData: Partial<User> = {
-                username: googleUser.email.split('@')[0],
-                email: googleUser.email,
-                verified: true,
-                google_id: googleUser.sub,
-                name: googleUser.name,
-                picture: googleUser.picture,
-                locale: googleUser.locale,
-                hd: googleUser.hd,
-                twitter_addresses: [],
-                auth_provider: 'google',
-                email_verified: googleUser.email_verified,
-                // Update login tracking
-                last_login_at: new Date().toISOString(),
-                current_sign_in_ip: googleUser.current_sign_in_ip,
-                last_sign_in_ip: googleUser.last_sign_in_ip,
-                login_count: (googleUser.login_count || 0) + 1,
-                sign_in_count: (googleUser.sign_in_count || 0) + 1,
-                // OAuth tokens
-                access_token: googleUser.access_token,
-                refresh_token: googleUser.refresh_token,
-                token_expiry: googleUser.token_expiry
+            const tokenInfo = JSON.parse(responseText);
+
+            // Validate token audience
+            if (tokenInfo.aud !== CLIENT_ID) {
+                throw new Error(`Token audience mismatch: expected ${CLIENT_ID}, got ${tokenInfo.aud}`);
+            }
+
+            // Check token expiration (exp is in seconds)
+            const tokenExpiration = tokenInfo.exp * 1000;
+            if (tokenExpiration < Date.now()) {
+                throw new Error(`Token expired at ${new Date(tokenExpiration).toISOString()}`);
+            }
+
+            // Fetch full user info using the token for more details
+            const userInfoUrl = 'https://www.googleapis.com/oauth2/v3/userinfo';
+            const userInfoResponse = await fetch(userInfoUrl, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (!userInfoResponse.ok) {
+                throw new Error('Failed to fetch user info from Google');
+            }
+
+            const userInfo = await userInfoResponse.json();
+            return {
+                ...tokenInfo,
+                ...userInfo
             };
 
-            // Try to find user by google_id first
-            let user = await this.getUserByGoogleId(googleUser.sub);
+        } catch (error: any) {
+            logger.error('Token introspection failed', { error: error.message });
+            throw new Error(`Authentication failed: ${error.message}`);
+        }
+    }
 
-            if (!user) {
-                // If not found, try by email
-                user = await this.getUserByEmail(googleUser.email);
+    /**
+     * Fetches the current user, attempting to refresh the token if necessary.
+     * @param accessToken Current access token.
+     * @param refreshToken Refresh token (optional).
+     * @returns The user object from the database.
+     */
+    getCurrentUser = async (accessToken: string, refreshToken?: string): Promise<User> => {
+        try {
+            // 1. First try with the current access token
+            try {
+                const payload = await this.introspectGoogleToken(accessToken);
+                return await this.getUserFromDatabase(payload.email);
+            } catch (accessError: any) {
+                logger.debug('Access token validation failed, attempting refresh...', { error: accessError.message });
 
-                if (user) {
-                    // Update existing user with new data
-                    user = await this.createOrUpdateUser({
-                        ...user,
-                        ...userData,
-                        // Don't reset these fields when updating
-                        created_at: user.created_at,
-                        updated_at: new Date().toISOString()
+                // 2. If we have a refresh token, try to get a new access token
+                if (refreshToken) {
+                    logger.info('Attempting to refresh access token...');
+                    const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+                    const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+
+                    if (!CLIENT_ID || !CLIENT_SECRET) {
+                        throw new Error('Missing Google OAuth configuration');
+                    }
+
+                    const tokenUrl = 'https://oauth2.googleapis.com/token';
+                    const response = await fetch(tokenUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Authorization': 'Basic ' + Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')
+                        },
+                        body: new URLSearchParams({
+                            grant_type: 'refresh_token',
+                            refresh_token: refreshToken
+                        }).toString()
                     });
-                } else {
-                    // Create new user
-                    user = await this.createOrUpdateUser({
-                        ...userData,
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    });
+
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        throw new Error(`Token refresh failed: ${response.status} - ${response.statusText}: ${errorText}`);
+                    }
+
+                    const refreshData = await response.json();
+                    const { access_token: newAccessToken } = refreshData;
+
+                    if (!newAccessToken) {
+                        throw new Error('No access token in refresh response');
+                    }
+
+                    // Verify the new access token
+                    const payload = await this.introspectGoogleToken(newAccessToken);
+
+                    // Return the user data
+                    return await this.getUserFromDatabase(payload.email);
                 }
-            } else {
-                // Update existing Google user
-                user = await this.createOrUpdateUser({
-                    ...user,
-                    ...userData,
-                    // Don't reset these fields when updating
-                    created_at: user.created_at,
-                    updated_at: new Date().toISOString()
-                });
+
+                // If no refresh token, re-throw the original error
+                throw accessError;
             }
-
-            return user;
-        } catch (error) {
-            logger.error('Error in findOrCreateGoogleUser:', error);
+        } catch (error: any) {
+            logger.error('Error in getCurrentUser', { error: error.message });
             throw error;
         }
-    }
+    };
 
-    // Get user by Google ID
-    private async getUserByGoogleId(googleId: string): Promise<User | null> {
-        try {
-            const safeGoogleId = googleId.replace(/'/g, "''");
-            const sql = `SELECT * FROM users WHERE google_id = '${safeGoogleId}' ORDER BY created_at DESC LIMIT 1;`;
-            const result = await questdbService.query(sql);
+    // --- Database Helper Methods (QuestDB) ---
 
-            if (result.rows.length === 0) return null;
-
-            const row = result.rows[0];
-            return this.mapUserRow(row);
-        } catch (error) {
-            logger.error(`Error fetching user by Google ID ${googleId}:`, error);
-            throw error;
-        }
-    }
-
-    // Update user's Google ID
-    private async updateUserGoogleId(email: string, googleId: string): Promise<void> {
-        try {
-            const safeEmail = email.replace(/'/g, "''");
-            const safeGoogleId = googleId.replace(/'/g, "''");
-            const sql = `UPDATE users SET google_id = '${safeGoogleId}' WHERE email = '${safeEmail}';`;
-            await questdbService.query(sql);
-        } catch (error) {
-            logger.error(`Error updating Google ID for user ${email}:`, error);
-            throw error;
-        }
-    }
-
-    private mapUserRow(row: any): User {
+    /**
+     * Maps a QuestDB row array to the User interface.
+     * NOTE: This relies on a strict, pre-determined column order in the DB table.
+     * @param row A single row array from QuestDB query result.
+     * @returns A partial User object.
+     */
+    private mapUserRow(row: any[]): User {
         return {
+            created_at: row[0],
             username: row[1],
             email: row[2],
             verified: Boolean(row[3]),
-            created_at: row[0],
             updated_at: row[4],
             twitter_addresses: JSON.parse(row[5] || '[]'),
             google_id: row[6],
@@ -243,6 +286,136 @@ export class UsersService {
         };
     }
 
+    /**
+     * Fetches a user from the database by email.
+     * @param email The user's email.
+     * @returns The User object or null if not found.
+     */
+    async getUserByEmail(email: string): Promise<User | null> {
+        try {
+            const safeEmail = email.replace(/'/g, "''");
+            const sql = `SELECT * FROM users WHERE email = '${safeEmail}' ORDER BY created_at DESC LIMIT 1;`;
+            const result = await questdbService.query(sql);
+            if (result.rows.length === 0) return null;
+            return this.mapUserRow(result.rows[0]);
+        } catch (error) {
+            logger.error(`Error fetching user by email ${email}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Fetches a user from the database by Google ID.
+     * @param googleId The user's Google ID.
+     * @returns The User object or null if not found.
+     */
+    private async getUserByGoogleId(googleId: string): Promise<User | null> {
+        try {
+            const safeGoogleId = googleId.replace(/'/g, "''");
+            const sql = `SELECT * FROM users WHERE google_id = '${safeGoogleId}' ORDER BY created_at DESC LIMIT 1;`;
+            const result = await questdbService.query(sql);
+            if (result.rows.length === 0) return null;
+            return this.mapUserRow(result.rows[0]);
+        } catch (error) {
+            logger.error(`Error fetching user by Google ID ${googleId}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Private helper to fetch user from DB and throw an error if not found.
+     * @param email The user's email.
+     * @returns The User object.
+     */
+    private async getUserFromDatabase(email: string): Promise<User> {
+        if (!email) {
+            throw new Error('No email provided for database lookup');
+        }
+
+        const user = await this.getUserByEmail(email);
+
+        if (!user) {
+            logger.warn('User not found in database', { email });
+            throw new Error('User not found');
+        }
+
+        logger.info('Successfully retrieved user from database', {
+            email: user.email,
+            username: user.username
+        });
+
+        return user;
+    }
+
+    // --- User Management Methods ---
+
+    /**
+     * Finds a user by google_id or email, or creates a new user.
+     * Updates user information on subsequent logins.
+     * @param googleUser User data from Google and OAuth tokens.
+     * @returns The newly created or updated User object.
+     */
+    async findOrCreateGoogleUser(googleUser: GoogleUserInfo & Partial<User>): Promise<User> {
+        try {
+            if (!googleUser.sub || !googleUser.email) {
+                throw new Error('Google user ID and email are required');
+            }
+
+            // Prepare base user data for update/creation
+            const nowIso = new Date().toISOString();
+            const userData: Partial<User> = {
+                username: googleUser.email.split('@')[0],
+                email: googleUser.email,
+                verified: true,
+                google_id: googleUser.sub,
+                name: googleUser.name,
+                picture: googleUser.picture,
+                locale: googleUser.locale,
+                hd: googleUser.hd,
+                twitter_addresses: [],
+                auth_provider: 'google',
+                email_verified: googleUser.email_verified,
+                last_login_at: nowIso,
+                current_sign_in_ip: googleUser.current_sign_in_ip,
+                last_sign_in_ip: googleUser.last_sign_in_ip,
+                access_token: googleUser.access_token,
+                refresh_token: googleUser.refresh_token,
+                token_expiry: googleUser.token_expiry
+            };
+
+            let user = await this.getUserByGoogleId(googleUser.sub);
+
+            if (!user) {
+                user = await this.getUserByEmail(googleUser.email);
+            }
+
+            // Merge data for create or update
+            const newUserData: Partial<User> = {
+                ...user, // existing user data
+                ...userData, // new data from Google/login
+                created_at: user?.created_at || nowIso, // preserve created_at or set now
+                updated_at: nowIso,
+                login_count: (user?.login_count || 0) + 1,
+                sign_in_count: (user?.sign_in_count || 0) + 1,
+            };
+
+            const createdOrUpdatedUser = await this.createOrUpdateUser(newUserData);
+            if (!createdOrUpdatedUser) {
+                throw new Error('Failed to create or update user in database.');
+            }
+            return createdOrUpdatedUser;
+
+        } catch (error) {
+            logger.error('Error in findOrCreateGoogleUser:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Creates a new user or updates an existing one based on email/google_id.
+     * @param userData The user data to create or update.
+     * @returns The created or updated User object.
+     */
     async createOrUpdateUser(userData: Partial<User>): Promise<User | null> {
         try {
             const nowIso = new Date().toISOString();
@@ -277,19 +450,20 @@ export class UsersService {
                 : await this.getUserByEmail(row.email);
 
             if (existingUser) {
-                // Update existing user
-                const updateFields = Object.entries(row)
+                // Fix TS7053 by explicitly casting to key/value tuple: [keyof typeof row, any]
+                const updateFields = (Object.entries(row) as [keyof typeof row, any][])
                     .filter(([key]) => key !== 'created_at') // Don't update created_at
                     .map(([key, value]) => {
-                        if (value === null) return `${key} = NULL`;
-                        if (typeof value === 'boolean') return `${key} = ${value}`; // Handle boolean values
-                        return `${key} = '${value}'`;
+                        const safeValue = value === null ? 'NULL' :
+                            typeof value === 'boolean' ? (value ? 'true' : 'false') :
+                                `'${String(value).replace(/'/g, "''")}'`;
+                        return `${String(key)} = ${safeValue}`; // Convert key back to string for SQL
                     })
                     .join(', ');
 
                 const sql = `UPDATE users 
-                       SET ${updateFields}
-                       WHERE email = '${row.email.replace(/'/g, "''")}';`;
+                SET ${updateFields}
+                WHERE email = '${row.email.replace(/'/g, "''")}';`;
 
                 await questdbService.query(sql);
             } else {
@@ -299,7 +473,7 @@ export class UsersService {
                     .map(v => {
                         if (v === null) return 'NULL';
                         if (typeof v === 'boolean') return v ? 'true' : 'false'; // Handle boolean values
-                        return `'${v}'`;
+                        return `'${String(v).replace(/'/g, "''")}'`; // Ensure all string values are escaped
                     })
                     .join(', ');
 
@@ -319,39 +493,17 @@ export class UsersService {
         }
     }
 
-    async getUserByEmail(email: string): Promise<User | null> {
-        try {
-            const safeEmail = email.replace(/'/g, "''");
-            const sql = `SELECT * FROM users WHERE email = '${safeEmail}' ORDER BY created_at DESC LIMIT 1;`;
-            const result = await questdbService.query(sql);
-            if (result.rows.length === 0) return null;
-
-            return this.mapUserRow(result.rows[0]);
-        } catch (error) {
-            logger.error(`Error fetching user by email ${email}:`, error);
-            throw error;
-        }
-    }
-
+    /**
+     * Updates the user's email verification status.
+     * @param email The user's email.
+     * @param verified The new verification status.
+     * @returns The updated User object or null.
+     */
     async updateUserVerification(email: string, verified: boolean): Promise<User | null> {
         try {
-            const user = await this.getUserByEmail(email);
-            if (!user) return null;
-
-            const nowIso = new Date().toISOString();
-            const row = {
-                username: user.username,
-                email: user.email,
-                verified,
-                created_at: user.created_at,
-                updated_at: nowIso,
-                twitter_addresses: user.twitter_addresses,
-                google_id: user.google_id,
-                name: user.name,
-                picture: user.picture
-            };
-
-            await questdbService.insertBatch('users', [row]); // Triggers upsert
+            const safeEmail = email.replace(/'/g, "''");
+            const sql = `UPDATE users SET verified = ${verified ? 'true' : 'false'}, email_verified = ${verified ? 'true' : 'false'}, updated_at = '${new Date().toISOString()}' WHERE email = '${safeEmail}';`;
+            await questdbService.query(sql);
             return await this.getUserByEmail(email);
         } catch (error) {
             logger.error(`Error updating verification for ${email}:`, error);
@@ -359,25 +511,18 @@ export class UsersService {
         }
     }
 
+    /**
+     * Updates the user's Twitter addresses list.
+     * @param email The user's email.
+     * @param twitterAddresses The new list of Twitter addresses.
+     * @returns The updated User object or null.
+     */
     async updateUserTwitterAddresses(email: string, twitterAddresses: string[]): Promise<User | null> {
         try {
-            const user = await this.getUserByEmail(email);
-            if (!user) return null;
-
-            const nowIso = new Date().toISOString();
-            const row = {
-                username: user.username,
-                email: user.email,
-                verified: user.verified,
-                created_at: user.created_at,
-                updated_at: nowIso,
-                twitter_addresses: twitterAddresses,
-                google_id: user.google_id,
-                name: user.name,
-                picture: user.picture
-            };
-
-            await questdbService.insertBatch('users', [row]); // Triggers upsert
+            const safeEmail = email.replace(/'/g, "''");
+            const safeAddresses = JSON.stringify(twitterAddresses).replace(/'/g, "''");
+            const sql = `UPDATE users SET twitter_addresses = '${safeAddresses}', updated_at = '${new Date().toISOString()}' WHERE email = '${safeEmail}';`;
+            await questdbService.query(sql);
             return await this.getUserByEmail(email);
         } catch (error) {
             logger.error(`Error updating twitter addresses for ${email}:`, error);
@@ -385,12 +530,16 @@ export class UsersService {
         }
     }
 
+    /**
+     * Lists users with optional filtering and pagination.
+     * @param limit Maximum number of users to return.
+     * @param offset Number of users to skip.
+     * @param verifiedOnly If true, only return verified users.
+     * @returns An array of User objects.
+     */
     async listUsers(limit: number = 10, offset: number = 0, verifiedOnly?: boolean): Promise<User[]> {
         try {
-            let whereClause = '';
-            if (verifiedOnly) {
-                whereClause = 'WHERE verified = true';
-            }
+            const whereClause = verifiedOnly ? 'WHERE verified = true' : '';
             const sql = `SELECT * FROM users ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset};`;
             const result = await questdbService.query(sql);
 
@@ -400,26 +549,6 @@ export class UsersService {
             throw error;
         }
     }
-
-    getCurrentUser = async (accessToken: string): Promise<any> => {
-        try {
-            // Verify the token and get the email using the existing googleClient instance
-            const ticket = await googleClient.verifyIdToken({
-                idToken: accessToken,
-                audience: process.env.GOOGLE_CLIENT_ID
-            });
-
-            const payload = ticket.getPayload();
-            if (!payload || !payload.email) {
-                throw new Error('No email found in token');
-            }
-
-            // Rest of your code remains the same...
-        } catch (error) {
-            logger.error('Error fetching current user:', error);
-            throw error;
-        }
-    };
 }
 
 export const usersService = new UsersService();
