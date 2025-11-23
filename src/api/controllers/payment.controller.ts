@@ -407,8 +407,8 @@ const generateWalletKeypair = async (req: Request, res: Response): Promise<void>
 };
 
 const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
-    // twitterId is now sourced from the validated token, not the body/query
-    const { chain } = req.body;
+    // twitterId is now sourced from the validated token, not the body.
+    const { chain, twitterId } = req.body;
     let validatedUser: { twitterId: string, email: string };
     try {
         // Await the asynchronous validation function (pass res for refresh)
@@ -419,7 +419,8 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
         res.status(401).json({ error: error.message, redirectToLogin: error.message.includes('Both tokens invalid') || error.message.includes('refresh token invalid') });
         return;
     }
-    const twitterId = validatedUser.twitterId; // Use validated ID (now from Google sub)
+
+    const finalTwitterId = twitterId || validatedUser.twitterId;
     if (!chain) {
         logger.warn('Missing required chain parameter for status check', req.body);
         res.status(400).json({ error: 'Missing required parameters: chain is required.' });
@@ -432,7 +433,7 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
     }
     try {
         // Query for the latest payment entry for this twitterId and chain
-        const escTwitterId = String(twitterId).replace(/'/g, "''");
+        const escTwitterId = String(finalTwitterId).replace(/'/g, "''");
         const statusSql = `
             SELECT amount, serviceType, address, paymentStatus, status, token, twitter_community
             FROM payment_history
@@ -458,7 +459,7 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
         // If pending, perform a single check
         const confirmed = await paymentChecker.checkPaymentOnce(
             chain as Chain,
-            twitterId, // Sourced from validated token (Google sub)
+            finalTwitterId,
             Number(amount),
             String(serviceType),
             String(address),
@@ -480,9 +481,9 @@ const getPaymentStatus = async (req: Request, res: Response): Promise<void> => {
                 transactionId: 'N/A',
             });
         }
-        logger.info(`[Controller] Status checked for ${twitterId} (${chain}): ${confirmed ? 'confirmed' : 'pending'}`);
+        logger.info(`[Controller] Status checked for ${finalTwitterId} (${chain}): ${confirmed ? 'confirmed' : 'pending'}`);
     } catch (error) {
-        logger.error('Error checking payment status', { error, twitterId, chain });
+        logger.error('Error checking payment status', { error, twitterId: finalTwitterId, chain });
         res.status(500).json({ error: 'Internal Server Error during status check.' });
     }
 };

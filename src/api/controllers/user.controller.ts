@@ -168,29 +168,29 @@ export const logoutUser = (req: Request, res: Response) => {
             secure: false,  // Should match the settings used when setting the cookie
             sameSite: 'none'
         });
-        
+
         res.clearCookie('google_refresh_token', {
             httpOnly: true,
             secure: false,  // Should match the settings used when setting the cookie
             sameSite: 'none'
         });
 
-        logger.info('User logged out successfully', { 
-            clientIp: req.ip || req.socket.remoteAddress || 'unknown' 
+        logger.info('User logged out successfully', {
+            clientIp: req.ip || req.socket.remoteAddress || 'unknown'
         });
 
-        res.status(200).json({ 
-            success: true, 
-            message: 'Successfully logged out' 
+        res.status(200).json({
+            success: true,
+            message: 'Successfully logged out'
         });
     } catch (error) {
         logger.error('Error during logout:', {
             error: error instanceof Error ? error.message : 'Unknown error',
             clientIp: req.ip || req.socket.remoteAddress || 'unknown'
         });
-        res.status(500).json({ 
-            success: false, 
-            error: 'An error occurred during logout' 
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred during logout'
         });
     }
 };
@@ -261,6 +261,27 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
     }
 };
 
+export const getCurrentUserProfile = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        // Get the access token from cookies
+        const accessToken = req.cookies?.google_access_token;
+        if (!accessToken) {
+            return res.status(401).json({ error: 'No access token provided' });
+        }
+
+        const user = await usersService.getCurrentUser(accessToken);
+        res.json(user);
+    } catch (error: any) {
+        logger.error('Error in getCurrentUserProfile:', error);
+        if (error.message === 'No email found in token') {
+            return res.status(400).json({ error: 'Invalid token: No email found' });
+        }
+        if (error.message === 'User not found') {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        next(error);
+    }
+};
 // Error handler for authentication
 export const handleAuthError = (error: Error, req: Request, res: Response, next: NextFunction) => {
     if (error.message === 'Invalid Google token') {

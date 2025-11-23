@@ -5,7 +5,7 @@ import { kolTradeService } from '../services/kolsActivity.service';
 import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 import { freeTrialController } from '../controllers/freeTrial.controller';
-import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser } from '../controllers/user.controller';
+import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser, getCurrentUserProfile } from '../controllers/user.controller';
 
 const kolsLeaderboardRouter = Router();
 /**
@@ -554,6 +554,10 @@ kolsLeaderboardRouter.get('/leaderboard/user-posts-plans', freeTrialController.g
 kolsLeaderboardRouter.get('/auth/google', googleAuthInit);
 kolsLeaderboardRouter.get('/auth/google/callback', googleAuthCallback);
 kolsLeaderboardRouter.post('/auth/google/verify', verifyGoogleToken);
+
+
+
+kolsLeaderboardRouter.get('/me', getCurrentUserProfile);
 
 
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config

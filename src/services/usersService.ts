@@ -400,6 +400,26 @@ export class UsersService {
             throw error;
         }
     }
+
+    getCurrentUser = async (accessToken: string): Promise<any> => {
+        try {
+            // Verify the token and get the email using the existing googleClient instance
+            const ticket = await googleClient.verifyIdToken({
+                idToken: accessToken,
+                audience: process.env.GOOGLE_CLIENT_ID
+            });
+
+            const payload = ticket.getPayload();
+            if (!payload || !payload.email) {
+                throw new Error('No email found in token');
+            }
+
+            // Rest of your code remains the same...
+        } catch (error) {
+            logger.error('Error fetching current user:', error);
+            throw error;
+        }
+    };
 }
 
 export const usersService = new UsersService();
