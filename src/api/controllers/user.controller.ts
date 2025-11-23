@@ -266,6 +266,7 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
         // Get the access token from cookies
         const accessToken = req.cookies?.google_access_token;
         const refreshToken = req.cookies?.google_refresh_token
+        console.log(req.cookies, "cookies")
         if (!accessToken) {
             return res.status(401).json({ error: 'No access token provided' });
         }
