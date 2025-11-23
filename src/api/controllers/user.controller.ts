@@ -129,7 +129,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             params.push(`picture=${userInfo.picture}`);
         }
         // Create redirect URL with user data as query parameters
-        const redirectBase = '/dashboard';
+        const redirectBase = 'https://xalerts.vercel.app/dashboard';
         const queryString = params.length > 0 ? `?${params.join('&')}` : '';
         const redirectUrl = `${redirectBase}${queryString}`;
         logger.info('Google authentication completed successfully', {
