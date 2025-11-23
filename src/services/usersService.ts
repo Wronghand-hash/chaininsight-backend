@@ -273,7 +273,10 @@ export class UsersService {
             }
             const mappedUser = this.mapUserRow(result.rows[0]);
             logger.debug(`getUserByEmail: Successfully mapped user with email "${mappedUser.email}"`);
-            return mappedUser;
+
+            // Exclude sensitive fields from the response
+            const { access_token, refresh_token, ...safeUser } = mappedUser;
+            return safeUser;
         } catch (error) {
             logger.error(`Error fetching user by email ${email}:`, error);
             throw error;

@@ -101,6 +101,7 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             httpOnly: true,
             secure: true,
             sameSite: 'none',
+            domain: 'api.hypeignite.io',
             maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000
         };
         res.cookie('google_access_token', tokens.access_token, cookieOptions);
