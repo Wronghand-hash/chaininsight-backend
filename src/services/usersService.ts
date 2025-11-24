@@ -1,6 +1,8 @@
 import { OAuth2Client } from 'google-auth-library';
 import { questdbService } from './questDbService';
 import { logger } from '../utils/logger';
+import { Pool } from 'pg';
+import { config } from '../utils/config';
 /**
  * Interface for Google's user information payload.
  */
@@ -46,7 +48,7 @@ export interface User {
 const googleClient = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    "https://api.hypeignite.io/scanner/api/v1/kol/auth/google/callback"
+    "http://localhost:3000/scanner/api/v1/kol/auth/google/callback"
 );
 /**
  * Generates the Google OAuth URL for sign-in.
@@ -228,30 +230,40 @@ export class UsersService {
      * @param row A single row array from QuestDB query result.
      * @returns A partial User object.
      */
-    private mapUserRow(row: any[]): User {
+    private mapUserRow(row: any): User {
+        // Handle case where row is an array (index-based) or object (key-based)
+        const getValue = (indexOrKey: string | number) => {
+            if (Array.isArray(row)) {
+                return row[Number(indexOrKey)];
+            }
+            return row[indexOrKey];
+        };
+
         return {
-            created_at: row[0],
-            username: row[1],
-            email: row[2],
-            verified: Boolean(row[3]),
-            updated_at: row[4],
-            twitter_addresses: JSON.parse(row[5] || '[]'),
-            google_id: row[6],
-            name: row[7],
-            picture: row[8],
-            access_token: row[9],
-            refresh_token: row[10],
-            token_expiry: row[11],
-            last_login_at: row[12],
-            login_count: row[13] ? Number(row[13]) : 0,
-            locale: row[14],
-            hd: row[15],
-            auth_provider: row[16] || 'google',
-            current_sign_in_ip: row[17],
-            last_sign_in_ip: row[18],
-            sign_in_count: row[19] ? Number(row[19]) : 0,
-            tos_accepted_at: row[20],
-            email_verified: Boolean(row[21])
+            username: getValue('username') || getValue(0) || '',
+            email: getValue('email') || getValue(1) || '',
+            verified: Boolean(getValue('verified') || getValue(2) || false),
+            created_at: getValue('created_at') || getValue(3),
+            updated_at: getValue('updated_at') || getValue(4),
+            twitter_addresses: typeof getValue('twitter_addresses') === 'string'
+                ? JSON.parse(getValue('twitter_addresses') as string)
+                : (getValue('twitter_addresses') || getValue(5) || []),
+            google_id: getValue('google_id') || getValue(6) || null,
+            name: getValue('name') || getValue(7) || null,
+            picture: getValue('picture') || getValue(8) || null,
+            access_token: getValue('access_token') || getValue(9) || null,
+            refresh_token: getValue('refresh_token') || getValue(10) || null,
+            token_expiry: getValue('token_expiry') || getValue(11) || null,
+            last_login_at: getValue('last_login_at') || getValue(12) || null,
+            login_count: Number(getValue('login_count') || getValue(13) || 0),
+            locale: getValue('locale') || getValue(14) || null,
+            hd: getValue('hd') || getValue(15) || null,
+            auth_provider: getValue('auth_provider') || getValue(16) || 'google',
+            current_sign_in_ip: getValue('current_sign_in_ip') || getValue(17) || null,
+            last_sign_in_ip: getValue('last_sign_in_ip') || getValue(18) || null,
+            sign_in_count: Number(getValue('sign_in_count') || getValue(19) || 0),
+            tos_accepted_at: getValue('tos_accepted_at') || getValue(20) || null,
+            email_verified: Boolean(getValue('email_verified') || getValue(21) || false)
         };
     }
     /**
@@ -261,24 +273,27 @@ export class UsersService {
      */
     async getUserByEmail(email: string): Promise<User | null> {
         try {
-            logger.debug(`getUserByEmail: Starting fetch for email "${email}"`);
+            logger.debug(`[DEBUG] getUserByEmail: Starting fetch for email "${email}"`);
             const safeEmail = email.replace(/'/g, "''");
             const sql = `SELECT * FROM google_users WHERE email = '${safeEmail}' ORDER BY created_at DESC LIMIT 1;`;
-            logger.debug(`getUserByEmail: Generated SQL: ${sql}`);
+            logger.debug(`[DEBUG] getUserByEmail: Generated SQL: ${sql}`);
+
             const result = await questdbService.query(sql);
-            logger.debug(`getUserByEmail: Raw result structure: { rowsLength: ${result.rows?.length || 'undefined'}, hasError: ${!!result}, sampleRowEmail: ${result.rows?.[0]?.[2] || 'none'} }`);
-            if (result.rows.length === 0) {
-                logger.debug(`getUserByEmail: No rows found for email "${email}"`);
+            logger.debug(`[DEBUG] getUserByEmail: Query result - rows.length: ${result.rows ? result.rows.length : 'undefined'}, columns: ${JSON.stringify(result.columns)}, full result: ${JSON.stringify(result)}`);
+
+            if (!result.rows || result.rows.length === 0) {
+                logger.debug(`[DEBUG] getUserByEmail: No rows found for email "${email}" - result.rows: ${JSON.stringify(result.rows)}`);
                 return null;
             }
-            const mappedUser = this.mapUserRow(result.rows[0]);
-            logger.debug(`getUserByEmail: Successfully mapped user with email "${mappedUser.email}"`);
+
+            const user = this.mapUserRow(result.rows[0]);
+            logger.debug(`[DEBUG] getUserByEmail: Successfully mapped user with email "${user.email}", user keys: ${Object.keys(user)}`);
 
             // Exclude sensitive fields from the response
-            const { access_token, refresh_token, ...safeUser } = mappedUser;
+            const { access_token, refresh_token, ...safeUser } = user;
             return safeUser;
         } catch (error) {
-            logger.error(`Error fetching user by email ${email}:`, error);
+            logger.error(`[ERROR] Error fetching user by email ${email}:`, error);
             throw error;
         }
     }
@@ -291,11 +306,13 @@ export class UsersService {
         try {
             const safeGoogleId = googleId.replace(/'/g, "''");
             const sql = `SELECT * FROM google_users WHERE google_id = '${safeGoogleId}' ORDER BY created_at DESC LIMIT 1;`;
+            logger.debug(`[DEBUG] getUserByGoogleId: SQL: ${sql}`);
             const result = await questdbService.query(sql);
-            if (result.rows.length === 0) return null;
+            logger.debug(`[DEBUG] getUserByGoogleId: Full result - rows.length: ${result.rows ? result.rows.length : 'undefined'}: ${JSON.stringify(result)}`);
+            if (!result.rows || result.rows.length === 0) return null;
             return this.mapUserRow(result.rows[0]);
         } catch (error) {
-            logger.error(`Error fetching user by Google ID ${googleId}:`, error);
+            logger.error(`[ERROR] Error fetching user by Google ID ${googleId}:`, error);
             throw error;
         }
     }
@@ -329,10 +346,10 @@ export class UsersService {
     async findOrCreateGoogleUser(googleUser: GoogleUserInfo & Partial<User>): Promise<User> {
         try {
             // Log 1: Function start and received data
-            logger.debug('Starting findOrCreateGoogleUser for sub:', googleUser.sub, 'email:', googleUser.email);
+            logger.debug('[DEBUG] Starting findOrCreateGoogleUser for sub:', googleUser.sub, 'email:', googleUser.email);
             if (!googleUser.sub || !googleUser.email) {
                 // Log 2: Validation failure
-                logger.error('Validation Error: Google user ID and email are required. Received:', { sub: googleUser.sub, email: googleUser.email });
+                logger.error('[ERROR] Validation Error: Google user ID and email are required. Received:', { sub: googleUser.sub, email: googleUser.email });
                 throw new Error('Google user ID and email are required');
             }
             // Prepare base user data for update/creation
@@ -357,21 +374,21 @@ export class UsersService {
                 token_expiry: googleUser.token_expiry
             };
             // Log 3: Prepared base user data
-            logger.debug('Prepared base userData for upsert:', { google_id: userData.google_id, email: userData.email });
+            logger.debug('[DEBUG] Prepared base userData for upsert:', { google_id: userData.google_id, email: userData.email, keys: Object.keys(userData) });
             let user = await this.getUserByGoogleId(googleUser.sub);
             // Log 4: Result of first lookup
             if (user) {
-                logger.debug('Found user by Google ID:', googleUser.sub);
+                logger.debug('[DEBUG] Found user by Google ID:', googleUser.sub);
             } else {
-                logger.debug('User not found by Google ID. Attempting lookup by email:', googleUser.email);
+                logger.debug('[DEBUG] User not found by Google ID. Attempting lookup by email:', googleUser.email);
             }
             if (!user) {
                 user = await this.getUserByEmail(googleUser.email);
                 // Log 5: Result of second lookup
                 if (user) {
-                    logger.debug('Found user by email. Merging accounts/updating profile.');
+                    logger.debug('[DEBUG] Found user by email. Merging accounts/updating profile.');
                 } else {
-                    logger.debug('User not found by email. A new user will be created.');
+                    logger.debug('[DEBUG] User not found by email. A new user will be created.');
                 }
             }
             // Merge data for create or update
@@ -385,107 +402,175 @@ export class UsersService {
                 sign_in_count: (user?.sign_in_count || 0) + 1,
             };
             // Log 6: Before database operation
-            logger.debug(`${isNewUser ? 'Creating' : 'Updating'} user in database. Login count: ${newUserData.login_count}.`);
-            logger.debug('Final newUserData keys being passed:', Object.keys(newUserData));
+            logger.debug(`[DEBUG] ${isNewUser ? 'Creating' : 'Updating'} user in database. Login count: ${newUserData.login_count}.`);
+            logger.debug('[DEBUG] Final newUserData keys being passed:', Object.keys(newUserData));
+            logger.debug('[DEBUG] Final newUserData values (masked sensitive):', { ...newUserData, access_token: '[MASKED]', refresh_token: '[MASKED]' });
             const createdOrUpdatedUser = await this.createOrUpdateUser(newUserData);
             // Log 7: Database operation result check
+            logger.debug('[DEBUG] createOrUpdateUser returned:', createdOrUpdatedUser ? { email: createdOrUpdatedUser.email, google_id: createdOrUpdatedUser.google_id } : 'null/undefined');
             if (!createdOrUpdatedUser) {
-                logger.error('Database Error: createOrUpdateUser returned null/undefined for:', googleUser.sub);
+                logger.error('[ERROR] Database Error: createOrUpdateUser returned null/undefined for:', googleUser.sub);
                 throw new Error('Failed to create or update user in database.');
             }
             // Log 8: Successful exit
-            logger.debug(`Successfully ${isNewUser ? 'created' : 'updated'} user ID: ${createdOrUpdatedUser.google_id}`);
+            logger.debug(`[DEBUG] Successfully ${isNewUser ? 'created' : 'updated'} user ID: ${createdOrUpdatedUser.google_id}`);
             return createdOrUpdatedUser;
         } catch (error) {
             // Existing Error Log
-            logger.error('Error in findOrCreateGoogleUser:', error);
+            logger.error('[ERROR] Error in findOrCreateGoogleUser:', error);
             throw error;
         }
     }
+
     /**
      * Creates a new user or updates an existing one based on email/google_id.
      * @param userData The user data to create or update.
      * @returns The created or updated User object.
      */
+    // In usersService.ts, update the createOrUpdateUser method:
+
+    // Updated createOrUpdateUser method in usersService.ts
+
     async createOrUpdateUser(userData: Partial<User>): Promise<User | null> {
+        await questdbService.init(); // Ensure the service is initialized
+        const pgClient = questdbService.pgClient;
         try {
             const nowIso = new Date().toISOString();
-            const row = {
-                username: userData.username || '',
-                email: userData.email || '',
-                verified: userData.verified || false,
-                created_at: userData.created_at || nowIso,
-                updated_at: nowIso,
-                twitter_addresses: JSON.stringify(userData.twitter_addresses || []),
-                google_id: userData.google_id || null,
-                name: userData.name || null,
-                picture: userData.picture || null,
-                access_token: userData.access_token || null,
-                refresh_token: userData.refresh_token || null,
-                token_expiry: userData.token_expiry || null,
-                last_login_at: userData.last_login_at || nowIso,
-                login_count: userData.login_count || 1,
-                locale: userData.locale || null,
-                hd: userData.hd || null,
-                auth_provider: userData.auth_provider || 'google',
-                current_sign_in_ip: userData.current_sign_in_ip || null,
-                last_sign_in_ip: userData.last_sign_in_ip || userData.current_sign_in_ip || null,
-                sign_in_count: userData.sign_in_count || 1,
-                tos_accepted_at: userData.tos_accepted_at || nowIso,
-                email_verified: userData.email_verified || false
+            const safeEmail = (userData.email || '').toLowerCase().trim();
+
+            // Build dynamic UPDATE SQL using array to avoid comma issues
+            const setClauses: string[] = [
+                `updated_at = '${nowIso}'`,
+                `last_login_at = '${nowIso}'`,
+                `login_count = COALESCE(login_count, 0) + 1`,
+                `sign_in_count = COALESCE(sign_in_count, 0) + 1`
+            ];
+
+            // Helper to add field if provided (and escape strings)
+            const esc = (s: string) => String(s || '').replace(/'/g, "''");
+            const addFieldIfProvided = (field: string, value: any) => {
+                if (value !== undefined && value !== null) {
+                    if (typeof value === 'boolean') {
+                        setClauses.push(`${field} = ${value}`);
+                    } else if (typeof value === 'number') {
+                        setClauses.push(`${field} = ${value}`);
+                    } else if (typeof value === 'string') {
+                        const safeVal = esc(value);
+                        setClauses.push(`${field} = '${safeVal}'`);
+                    } else if (value && typeof value === 'object') {
+                        const safeVal = esc(JSON.stringify(value));
+                        setClauses.push(`${field} = '${safeVal}'`);
+                    }
+                }
             };
-            logger.debug(`createOrUpdateUser: Prepared row with email "${row.email}", google_id "${row.google_id}"`);
-            // Check if user exists
-            const existingUser = userData.google_id
-                ? await this.getUserByGoogleId(userData.google_id)
-                : await this.getUserByEmail(row.email);
-            logger.debug(`createOrUpdateUser: Existing user found? ${!!existingUser}`);
-            if (existingUser) {
-                logger.debug(`createOrUpdateUser: Updating existing user for email "${row.email}"`);
-                // Fix TS7053 by explicitly casting to key/value tuple: [keyof typeof row, any]
-                const updateFields = (Object.entries(row) as [keyof typeof row, any][])
-                    .filter(([key]) => key !== 'created_at') // Don't update created_at
-                    .map(([key, value]) => {
-                        const safeValue = value === null ? 'NULL' :
-                            typeof value === 'boolean' ? (value ? 'true' : 'false') :
-                                `'${String(value).replace(/'/g, "''")}'`;
-                        return `${String(key)} = ${safeValue}`; // Convert key back to string for SQL
-                    })
-                    .join(', ');
-                const sql = `UPDATE google_users
-                SET ${updateFields}
-                WHERE email = '${row.email.replace(/'/g, "''")}';`;
-                logger.debug(`createOrUpdateUser: Update SQL: ${sql}`);
-                const updateResult = await questdbService.query(sql);
-                logger.debug(`createOrUpdateUser: Update executed, result: { hasError: ${!!updateResult}, affectedRows: ${updateResult.rows || 'unknown'} }`);
-            } else {
-                logger.debug(`createOrUpdateUser: Inserting new user for email "${row.email}"`);
-                // Insert new user
-                const columns = Object.keys(row).join(', ');
-                const values = Object.values(row)
-                    .map(v => {
-                        if (v === null) return 'NULL';
-                        if (typeof v === 'boolean') return v ? 'true' : 'false'; // Handle boolean values
-                        return `'${String(v).replace(/'/g, "''")}'`; // Ensure all string values are escaped
-                    })
-                    .join(', ');
-                const sql = `INSERT INTO google_users (${columns}) VALUES (${values});`;
-                logger.debug(`createOrUpdateUser: Insert SQL: ${sql}`);
-                const insertResult = await questdbService.query(sql);
-                logger.debug(`createOrUpdateUser: Insert executed, result: { hasError: ${!!insertResult}, insertedId: ${insertResult.rows || 'unknown'} }`);
-                // Brief delay to allow WAL commit in QuestDB
-                await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Always set these on update if in userData
+            addFieldIfProvided('username', userData.username || safeEmail.split('@')[0] || 'user');
+            addFieldIfProvided('verified', userData.verified ?? true);
+            addFieldIfProvided('twitter_addresses', userData.twitter_addresses || []);
+            addFieldIfProvided('google_id', userData.google_id);
+            addFieldIfProvided('name', userData.name);
+            addFieldIfProvided('picture', userData.picture);
+            addFieldIfProvided('access_token', userData.access_token);
+            addFieldIfProvided('refresh_token', userData.refresh_token);
+            const tokenExpiry = userData.token_expiry ? new Date(userData.token_expiry).toISOString() : null;
+            addFieldIfProvided('token_expiry', tokenExpiry);
+            addFieldIfProvided('locale', userData.locale || 'not provided');
+            addFieldIfProvided('hd', userData.hd || 'not provided');
+            addFieldIfProvided('auth_provider', userData.auth_provider || 'google');
+            addFieldIfProvided('current_sign_in_ip', userData.current_sign_in_ip);
+            addFieldIfProvided('last_sign_in_ip', userData.last_sign_in_ip || userData.current_sign_in_ip);
+            addFieldIfProvided('email_verified', userData.email_verified ?? true);
+
+            // For tos_accepted_at, set to now if not provided
+            const tosValue = userData.tos_accepted_at ? new Date(userData.tos_accepted_at).toISOString() : nowIso;
+            addFieldIfProvided('tos_accepted_at', tosValue);
+
+            const updateSql = `UPDATE google_users
+        SET ${setClauses.join(', ')}
+        WHERE email = '${esc(safeEmail)}'`;
+
+            // Execute UPDATE (no RETURNING - not supported in QuestDB)
+            try {
+                await pgClient.query(updateSql);
+                // If update didn't throw, check if user exists now
+                const updatedUser = await this.getUserByEmail(safeEmail);
+                if (updatedUser) {
+                    return this.mapUserRow(updatedUser);
+                }
+            } catch (error: any) {
+                logger.debug('Update failed, will attempt insert', { error: error.message });
+                // Continue to insert if update fails (likely because row doesn't exist)
             }
-            // Fetch the updated/inserted user
-            logger.debug(`createOrUpdateUser: Fetching user by email "${row.email}" after ${existingUser ? 'update' : 'insert'}`);
-            const user = await this.getUserByEmail(row.email);
-            logger.debug(`createOrUpdateUser: Fetched user after operation: ${!!user ? 'success' : 'null'}`);
-            return user;
+
+            // If no rows updated, perform INSERT (using string interpolation for QuestDB)
+            const username = userData.username || safeEmail.split('@')[0] || 'user';
+            const verified = userData.verified ?? true;
+            const twitterAddresses = JSON.stringify(userData.twitter_addresses || []);
+            const tokenExpiryStr = tokenExpiry || 'NULL';
+            const locale = userData.locale || 'not provided';
+            const hd = userData.hd || 'not provided';
+            const authProvider = userData.auth_provider || 'google';
+            const currentSignInIp = userData.current_sign_in_ip ? `'${esc(userData.current_sign_in_ip)}'` : 'NULL';
+            const lastSignInIp = userData.last_sign_in_ip ? `'${esc(userData.last_sign_in_ip)}'` : 'NULL';
+            const tosAcceptedAt = userData.tos_accepted_at ?
+                `'${new Date(userData.tos_accepted_at).toISOString()}'` : `'${nowIso}'`;
+            const emailVerified = userData.email_verified ?? true;
+
+            const insertQuery = `
+            INSERT INTO google_users (
+                created_at, updated_at, email, username, verified, twitter_addresses,
+                google_id, name, picture, access_token, refresh_token, token_expiry,
+                last_login_at, login_count, locale, hd, auth_provider,
+                current_sign_in_ip, last_sign_in_ip, sign_in_count, tos_accepted_at, email_verified
+            ) VALUES (
+                '${nowIso}', '${nowIso}', '${esc(safeEmail)}', '${esc(username)}', ${verified}, 
+                '${twitterAddresses}',
+                ${userData.google_id ? `'${esc(userData.google_id)}'` : 'NULL'},
+                ${userData.name ? `'${esc(userData.name)}'` : 'NULL'},
+                ${userData.picture ? `'${esc(userData.picture)}'` : 'NULL'},
+                ${userData.access_token ? `'${esc(userData.access_token)}'` : 'NULL'},
+                ${userData.refresh_token ? `'${esc(userData.refresh_token)}'` : 'NULL'},
+                ${tokenExpiryStr !== 'NULL' ? `'${tokenExpiryStr}'` : 'NULL'},
+                '${nowIso}', 1, 
+                '${esc(locale)}', '${esc(hd)}', '${authProvider}',
+                ${currentSignInIp}, ${lastSignInIp}, 1, 
+                ${tosAcceptedAt}, ${emailVerified}
+            );
+        `;
+
+            logger.debug('Executing INSERT query:', insertQuery);
+            await pgClient.query(insertQuery);
+
+            // Add a small delay to ensure the data is committed
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            // Fetch the newly inserted user with retry logic
+            let insertedUser = await this.getUserByEmail(safeEmail);
+            let retryCount = 0;
+            const maxRetries = 3;
+
+            while (!insertedUser && retryCount < maxRetries) {
+                retryCount++;
+                logger.debug(`[DEBUG] Retry ${retryCount} to fetch inserted user...`);
+                await new Promise(resolve => setTimeout(resolve, 100 * retryCount));
+                insertedUser = await this.getUserByEmail(safeEmail);
+            }
+
+            if (!insertedUser) {
+                logger.error('[ERROR] Failed to fetch inserted user after retries');
+                throw new Error('Failed to verify user creation');
+            }
+
+            logger.debug('[DEBUG] Successfully fetched inserted user:', insertedUser);
+            return this.mapUserRow(insertedUser);
+
         } catch (error) {
-            logger.error('Error creating/updating user:', error);
+            logger.error('Error in createOrUpdateUser:', error);
             throw error;
         }
     }
+
     /**
      * Updates the user's email verification status.
      * @param email The user's email.
@@ -496,10 +581,12 @@ export class UsersService {
         try {
             const safeEmail = email.replace(/'/g, "''");
             const sql = `UPDATE google_users SET verified = ${verified ? 'true' : 'false'}, email_verified = ${verified ? 'true' : 'false'}, updated_at = '${new Date().toISOString()}' WHERE email = '${safeEmail}';`;
-            await questdbService.query(sql);
+            logger.debug(`[DEBUG] updateUserVerification: SQL: ${sql}`);
+            const result = await questdbService.query(sql);
+            logger.debug(`[DEBUG] updateUserVerification: Full result: ${JSON.stringify(result)}`);
             return await this.getUserByEmail(email);
         } catch (error) {
-            logger.error(`Error updating verification for ${email}:`, error);
+            logger.error(`[ERROR] Error updating verification for ${email}:`, error);
             throw error;
         }
     }
@@ -514,10 +601,12 @@ export class UsersService {
             const safeEmail = email.replace(/'/g, "''");
             const safeAddresses = JSON.stringify(twitterAddresses).replace(/'/g, "''");
             const sql = `UPDATE google_users SET twitter_addresses = '${safeAddresses}', updated_at = '${new Date().toISOString()}' WHERE email = '${safeEmail}';`;
-            await questdbService.query(sql);
+            logger.debug(`[DEBUG] updateUserTwitterAddresses: SQL: ${sql}`);
+            const result = await questdbService.query(sql);
+            logger.debug(`[DEBUG] updateUserTwitterAddresses: Full result: ${JSON.stringify(result)}`);
             return await this.getUserByEmail(email);
         } catch (error) {
-            logger.error(`Error updating twitter addresses for ${email}:`, error);
+            logger.error(`[ERROR] Error updating twitter addresses for ${email}:`, error);
             throw error;
         }
     }
@@ -532,10 +621,12 @@ export class UsersService {
         try {
             const whereClause = verifiedOnly ? 'WHERE verified = true' : '';
             const sql = `SELECT * FROM google_users ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset};`;
+            logger.debug(`[DEBUG] listUsers: SQL: ${sql}`);
             const result = await questdbService.query(sql);
-            return result.rows.map((row: any[]) => this.mapUserRow(row));
+            logger.debug(`[DEBUG] listUsers: Full result: ${JSON.stringify({ rowsLength: result.rows?.length, hasError: !!result })}`);
+            return result.rows?.map((row: any[]) => this.mapUserRow(row)) || [];
         } catch (error) {
-            logger.error('Error listing users:', error);
+            logger.error('[ERROR] Error listing users:', error);
             throw error;
         }
     }
