@@ -8,7 +8,7 @@ import { TokenInfoResponse } from '../models/token.types';
 type Chain = 'BSC' | 'ETH' | 'SOL';
 export class QuestDBService {
   private sender?: Sender;
-  private pgClient: Client;
+  public pgClient: Client;
   private initialized = false;
   private initPromise?: Promise<void>;
   constructor() {
@@ -78,7 +78,7 @@ export class QuestDBService {
       ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`;
     await this.pgClient.query(kolTradesCreateSql);
     logger.debug(`✅ Table created: kol_trades`);
-    // google_users table
+    // google_users table (DISABLE WAL to avoid suspension on upserts/ALTERs)
     const usersCreateSql = `CREATE TABLE IF NOT EXISTS google_users (
         created_at TIMESTAMP,
         username STRING,
@@ -102,7 +102,7 @@ export class QuestDBService {
         sign_in_count LONG,
         tos_accepted_at TIMESTAMP,
         email_verified BOOLEAN
-      ) TIMESTAMP(created_at) PARTITION BY DAY${wal};`;
+      ) TIMESTAMP(created_at) PARTITION BY DAY;`;  // No WAL
     await this.pgClient.query(usersCreateSql);
     logger.debug(`✅ Table created: google_users`);
 
@@ -158,7 +158,7 @@ export class QuestDBService {
           title STRING,
           updated_at TIMESTAMP,
           CTO STRING
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY;`  // No WAL for upserts
       },
       {
         name: 'payment_history',
@@ -209,7 +209,7 @@ export class QuestDBService {
           total_posts_count INT,
           twitter_community STRING,
           token STRING
-        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal}`
+        ) TIMESTAMP(timestamp) PARTITION BY DAY;`  // No WAL for upserts
       }
     ];
     try {
@@ -312,17 +312,13 @@ export class QuestDBService {
           const checkRes = await this.pgClient.query(checkSql, [email]);
           const exists = checkRes.rows[0]?.c > 0;
           if (exists) {
-            // Update existing user
-            const esc = (s: string) => s.replace(/'/g, "''");
+            // Update existing user (parameterized)
             const updateSql = `
               UPDATE google_users
-              SET username = '${esc(username)}',
-                  verified = ${verified},
-                  updated_at = '${updatedAt}',
-                  twitter_addresses = '${esc(twitterAddresses)}'
-              WHERE email = '${esc(email)}';
+              SET username = $1, verified = $2, updated_at = $3, twitter_addresses = $4
+              WHERE email = $5;
             `;
-            await this.pgClient.query(updateSql);
+            await this.pgClient.query(updateSql, [username, verified, updatedAt, twitterAddresses, email]);
           } else {
             // Insert new user
             const insertSql = `INSERT INTO google_users (created_at, username, email, verified, updated_at, twitter_addresses) VALUES ($1, $2, $3, $4, $5, $6);`;
@@ -330,7 +326,7 @@ export class QuestDBService {
           }
           continue;
         }
-        // Special upsert for token_metrics
+        // Special upsert for token_metrics (parameterized UPDATE)
         if (table === 'token_metrics') {
           const nowIso = new Date().toISOString();
           const ts = String(row.timestamp ?? nowIso);
@@ -353,26 +349,78 @@ export class QuestDBService {
           const checkRes = await this.pgClient.query(checkSql, [contract, chain]);
           const exists = checkRes.rows[0]?.c > 0;
           if (exists) {
-            const esc = (s: string) => s.replace(/'/g, "''");
-            const nullable = (n: number | null) => (n == null || Number.isNaN(n) ? 'NULL' : String(n));
-            const setParts: string[] = [
-              `updated_at = '${esc(nowIso)}'`
-            ];
-            if (row.price_usd != null) setParts.push(`price_usd = ${nullable(priceUsd)}`);
-            if (row.market_cap != null) setParts.push(`market_cap = ${nullable(marketCap)}`);
-            if (row.fdv != null) setParts.push(`fdv = ${nullable(fdv)}`);
-            if (row.volume_5m != null) setParts.push(`volume_5m = ${nullable(volume5m)}`);
-            if (row.volume_24h != null) setParts.push(`volume_24h = ${nullable(volume24h)}`);
-            if (row.title != null) setParts.push(`title = '${esc(title)}'`);
-            if (row.CTO != null) setParts.push(`CTO = '${esc(CTOStr)}'`);
-            if (row.call_count != null) setParts.push(`call_count = ${callCount}`);
-            if (row.kol_calls_count != null) setParts.push(`kol_calls_count = ${kolCallsCount}`);
-            if (row.mention_user_count != null) setParts.push(`mention_user_count = ${mentionUserCount}`);
-            if (row.calls_data != null) setParts.push(`calls_data = '${esc(callsData)}'`);
-            if (row.community_data != null) setParts.push(`community_data = '${esc(communityData)}'`);
-            if (row.narrative_data != null) setParts.push(`narrative_data = '${esc(narrativeData)}'`);
-            const updateSql = `UPDATE token_metrics SET ${setParts.join(', ')} WHERE contract = '${esc(contract)}' AND chain = '${esc(chain)}';`;
-            await this.pgClient.query(updateSql);
+            // Build parameterized UPDATE
+            let setClause = 'updated_at = $1';
+            const params: any[] = [nowIso];
+            let paramIndex = 2;
+            if (row.price_usd != null) {
+              setClause += `, price_usd = $${paramIndex}`;
+              params.push(priceUsd);
+              paramIndex++;
+            }
+            if (row.market_cap != null) {
+              setClause += `, market_cap = $${paramIndex}`;
+              params.push(marketCap);
+              paramIndex++;
+            }
+            if (row.fdv != null) {
+              setClause += `, fdv = $${paramIndex}`;
+              params.push(fdv);
+              paramIndex++;
+            }
+            if (row.volume_5m != null) {
+              setClause += `, volume_5m = $${paramIndex}`;
+              params.push(volume5m);
+              paramIndex++;
+            }
+            if (row.volume_24h != null) {
+              setClause += `, volume_24h = $${paramIndex}`;
+              params.push(volume24h);
+              paramIndex++;
+            }
+            if (row.title != null) {
+              setClause += `, title = $${paramIndex}`;
+              params.push(title);
+              paramIndex++;
+            }
+            if (row.CTO != null) {
+              setClause += `, CTO = $${paramIndex}`;
+              params.push(CTOStr);
+              paramIndex++;
+            }
+            if (row.call_count != null) {
+              setClause += `, call_count = $${paramIndex}`;
+              params.push(callCount);
+              paramIndex++;
+            }
+            if (row.kol_calls_count != null) {
+              setClause += `, kol_calls_count = $${paramIndex}`;
+              params.push(kolCallsCount);
+              paramIndex++;
+            }
+            if (row.mention_user_count != null) {
+              setClause += `, mention_user_count = $${paramIndex}`;
+              params.push(mentionUserCount);
+              paramIndex++;
+            }
+            if (row.calls_data != null) {
+              setClause += `, calls_data = $${paramIndex}`;
+              params.push(callsData);
+              paramIndex++;
+            }
+            if (row.community_data != null) {
+              setClause += `, community_data = $${paramIndex}`;
+              params.push(communityData);
+              paramIndex++;
+            }
+            if (row.narrative_data != null) {
+              setClause += `, narrative_data = $${paramIndex}`;
+              params.push(narrativeData);
+              paramIndex++;
+            }
+            const updateSql = `UPDATE token_metrics SET ${setClause} WHERE contract = $${paramIndex} AND chain = $${paramIndex + 1};`;
+            params.push(contract, chain);
+            await this.pgClient.query(updateSql, params);
           } else {
             const insertSql = `INSERT INTO token_metrics (
               timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h,
@@ -434,21 +482,16 @@ export class QuestDBService {
           const checkSql = `SELECT count(*) as c FROM user_posts_plans WHERE twitter_id = $1 AND service_type = $2;`;
           const checkRes = await this.pgClient.query(checkSql, [twitterId, serviceType]);
           if (checkRes.rows[0]?.c > 0) {
-            // Update existing plan - don't update the timestamp as it's a designated column
-            // Using string interpolation for QuestDB compatibility
-            const esc = (s: string) => s.replace(/'/g, "''");
+            // Update existing plan (parameterized)
             const updateSql = `
               UPDATE user_posts_plans
-              SET email = '${esc(email)}',
-                  expire_at = '${expireAt.replace(/'/g, "''")}',
-                  total_posts_allowed = ${totalPostsAllowed},
-                  total_posts_count = ${totalPostsCount},
-                  twitter_community = '${(row.twitter_community || '').replace(/'/g, "''")}',
-                  token = '${(row.token || '').replace(/'/g, "''")}'
-              WHERE twitter_id = '${twitterId.replace(/'/g, "''")}'
-              AND service_type = '${serviceType.replace(/'/g, "''")}';
+              SET email = $1, expire_at = $2, total_posts_allowed = $3, total_posts_count = $4, twitter_community = $5, token = $6
+              WHERE twitter_id = $7 AND service_type = $8;
             `;
-            await this.pgClient.query(updateSql);
+            await this.pgClient.query(updateSql, [
+              email, expireAt, totalPostsAllowed, totalPostsCount,
+              row.twitter_community || '', row.token || '', twitterId, serviceType
+            ]);
           } else {
             // Insert new plan
             const insertSql = `
@@ -636,7 +679,7 @@ export class QuestDBService {
         }
       }
 
-      // Set default values
+      // Set default values (idempotent with COALESCE)
       await this.pgClient.query(`
         UPDATE google_users
         SET
