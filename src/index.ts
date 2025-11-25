@@ -81,7 +81,7 @@ const runMigrations = async () => {
 (async () => {
   try {
     await questdbService.init();
-    await runMigrations();
+    // await runMigrations();
     // await kafkaService.connect();  // NEW: Connect Kafka consumer
     // await kafkaService.consume();  // NEW: Start consuming KOL pushes (background)
     // await tokenMetricsDexscreenerPoller.start();
@@ -99,7 +99,7 @@ const runMigrations = async () => {
       logger.error('Payment service test failed:', error);
     }
     app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT} with QuestDB + Kafka integration`);
+      logger.info(`Server running on port ${PORT} with QuestDB`);
     });
   } catch (error) {
     logger.error('Startup failed', error);

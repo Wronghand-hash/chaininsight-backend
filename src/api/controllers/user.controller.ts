@@ -1,6 +1,7 @@
 // src/api/controllers/user.controller.ts
 import { Request, Response, NextFunction, CookieOptions } from 'express';
 import { usersService, getGoogleAuthUrl, GoogleUserInfo } from '../../services/usersService';
+import { questdbService } from '../../services/questDbService';
 import { logger } from '../../utils/logger';
 // Extend Express Request type to include user
 declare global {
@@ -238,6 +239,36 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
         next(error);
     }
 };
+/**
+ * Get all users from google_users table
+ * @route GET /kol/users
+ * @returns {Promise<void>}
+ */
+export const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        // Initialize the QuestDB service if not already initialized
+        await questdbService.init();
+
+        const query = 'SELECT * FROM google_users ORDER BY created_at DESC';
+        const result = await questdbService.pgClient.query(query);
+
+        res.status(200).json({
+            success: true,
+            count: result.rowCount || 0,
+            data: result.rows
+        });
+    } catch (error) {
+        logger.error('Error fetching users:', error);
+        next(error);
+    }
+};
+
+// ... (rest of the code remains the same)
+/**
+ * Get current user profile
+ * @route GET /kol/profile
+ * @returns {Promise<void>}
+ */
 export const getCurrentUserProfile = async (req: Request, res: Response, next: NextFunction) => {
     try {
         // Get the access token from cookies

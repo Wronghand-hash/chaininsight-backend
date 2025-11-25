@@ -5,7 +5,7 @@ import { kolTradeService } from '../services/kolsActivity.service';
 import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 import { freeTrialController } from '../controllers/freeTrial.controller';
-import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser, getCurrentUserProfile } from '../controllers/user.controller';
+import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser, getCurrentUserProfile, getAllUsers } from '../controllers/user.controller';
 
 const kolsLeaderboardRouter = Router();
 /**
@@ -597,4 +597,46 @@ kolsLeaderboardRouter.get('/me', getCurrentUserProfile);
 //           type: string
 //         tradeCount:
 //           type: integer
+/**
+ * @swagger
+ * /kol/users:
+ *   get:
+ *     summary: Get all users from google_users table
+ *     tags: [Users]
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved users
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 count:
+ *                   type: number
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: number
+ *                       email:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *                       last_login_at:
+ *                         type: string
+ *                         format: date-time
+ *                       login_count:
+ *                         type: number
+ *       500:
+ *         description: Internal server error
+ */
+kolsLeaderboardRouter.get('/users', getAllUsers);
+
 export default kolsLeaderboardRouter;
