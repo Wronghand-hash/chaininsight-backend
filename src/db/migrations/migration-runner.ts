@@ -63,52 +63,99 @@ export class MigrationRunner {
     logger.info(`Found ${migrationFiles.length} SQL migration files: ${JSON.stringify(migrationFiles)}`);
     // Sort migrations by their numeric prefix
     const sortedMigrations = migrationFiles
-      .map(file => ({
-        file,
-        id: parseInt(file.split('_')[0])
-      }))
+      .map(file => {
+        // Extract the numeric part at the start of the filename
+        const match = file.match(/^(\d+)_/);
+        const id = match ? parseInt(match[1], 10) : 0;
+        return { file, id };
+      })
       .sort((a, b) => a.id - b.id)
       .map(x => x.file);
+
+    logger.info(`Migration files found: ${migrationFiles.join(', ')}`);
     logger.info(`Sorted migrations: ${JSON.stringify(sortedMigrations)}`);
     // Begin transaction
     // Note: QuestDB supports transactional DDL only in certain versions/contexts,
     // but using BEGIN/COMMIT/ROLLBACK is good practice for the migration tracker table.
     await this.client.query('BEGIN');
     try {
-      // Get applied migrations
-      const { rows: appliedMigrations } = await this.client.query<{ id: number }>(
-        `SELECT id FROM ${MIGRATIONS_TABLE}`
+      // Get applied migrations with names for better debugging
+      const { rows: appliedMigrations } = await this.client.query<{ id: number, name: string }>(
+        `SELECT id, name FROM ${MIGRATIONS_TABLE} ORDER BY id`
       );
+      logger.info(`Applied migrations: ${JSON.stringify(appliedMigrations)}`);
+
       const appliedIds = new Set(appliedMigrations.map(m => m.id));
       let migrationsRun = 0;
+
+      // Check for missing migrations in the database
+      const missingMigrations = sortedMigrations.filter(file => {
+        const match = file.match(/^(\d+)_/);
+        const id = match ? parseInt(match[1], 10) : 0;
+        return !appliedIds.has(id);
+      });
+      logger.info(`Missing migrations that need to be applied: ${JSON.stringify(missingMigrations)}`);
+
+      // Check for migrations in DB without corresponding files
+      const extraMigrations = appliedMigrations.filter(m =>
+        !sortedMigrations.some(file => file.startsWith(m.id.toString().padStart(4, '0') + '_'))
+      );
+      if (extraMigrations.length > 0) {
+        logger.warn(`Found ${extraMigrations.length} migrations in the database without corresponding files: ${JSON.stringify(extraMigrations)}`);
+      }
+
       logger.info(`Processing migrations, ${sortedMigrations.length} found, ${appliedIds.size} already applied`);
       for (const file of sortedMigrations) {
-        const id = parseInt(file.split('_')[0]);
-        if (appliedIds.has(id)) continue;
-        const filePath = join(MIGRATIONS_DIR, file);
-        const sql = readFileSync(filePath, 'utf-8');
-        logger.info(`Running migration: ${file}`);
-        // 🛠️ Robust split: Split SQL into individual statements by semicolon,
-        // filtering out empty lines and lines starting with SQL comments (--)
-        const statements = sql
-          .split(';')
-          .map(s => s.trim())
-          // Filter: Keep if non-empty AND does not start with a comment
-          .filter(s => s.length > 0 && !s.startsWith('--'));
-        // Execute each statement individually
-        for (const statement of statements) {
-          logger.debug(`Executing statement: ${statement}`);
-          // QuestDB DDL (like ALTER TABLE ADD INDEX) executes immediately and is not
-          // part of the transaction, but we proceed with the transaction logic for safety.
-          await this.client.query(statement);
+        const match = file.match(/^(\d+)_/);
+        if (!match) {
+          logger.warn(`Skipping invalid migration file (missing ID prefix): ${file}`);
+          continue;
         }
-        // Record migration in the tracking table
-        await this.client.query(
-          `INSERT INTO ${MIGRATIONS_TABLE} (id, name, applied_at) VALUES ($1, $2, now())`,
-          [id, file]
-        );
-        migrationsRun++;
-        logger.info(`Successfully applied migration: ${file}`);
+
+        const id = parseInt(match[1], 10);
+        if (appliedIds.has(id)) {
+          logger.debug(`Skipping already applied migration: ${file} (ID: ${id})`);
+          continue;
+        }
+
+        const filePath = join(MIGRATIONS_DIR, file);
+        logger.info(`Applying migration: ${file} (ID: ${id})`);
+
+        try {
+          const sql = readFileSync(filePath, 'utf-8');
+
+          // 🛠️ Robust split: Split SQL into individual statements by semicolon,
+          // filtering out empty lines and lines starting with SQL comments (--)
+          const statements = sql
+            .split(';')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.startsWith('--'));
+
+          // Execute each statement individually
+          for (const [index, statement] of statements.entries()) {
+            const shortStmt = statement.length > 100 ? `${statement.substring(0, 100)}...` : statement;
+            logger.debug(`[${file}] Executing statement ${index + 1}/${statements.length}: ${shortStmt}`);
+
+            try {
+              await this.client.query(statement);
+            } catch (error: any) {
+              logger.error(`Error executing statement ${index + 1} in ${file}: ${error.message}`);
+              logger.error(`Failed statement: ${statement}`);
+              throw error; // Re-throw to trigger transaction rollback
+            }
+          }
+          // Record migration in the tracking table
+          await this.client.query(
+            `INSERT INTO ${MIGRATIONS_TABLE} (id, name, applied_at) VALUES ($1, $2, now())`,
+            [id, file]
+          );
+          migrationsRun++;
+          logger.info(`✅ Successfully applied migration: ${file} (ID: ${id})`);
+
+        } catch (error) {
+          logger.error(`❌ Failed to apply migration ${file} (ID: ${id}):`, error);
+          throw error; // This will trigger the transaction rollback
+        }
       }
       await this.client.query('COMMIT');
       logger.info(`Migrations complete. ${migrationsRun} new migrations applied.`);
