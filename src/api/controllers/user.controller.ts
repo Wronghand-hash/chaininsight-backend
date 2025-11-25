@@ -97,12 +97,17 @@ export const googleAuthCallback = async (req: Request, res: Response, next: Next
             clientIp
         };
         logger.info('User processed successfully', userLogData);
+        const backendDomain = 'api.hypeignite.io';
+        const secureFlag = true;
+        const sameSiteFlag = 'none';
+
         const cookieOptions: CookieOptions = {
             httpOnly: true,
-            secure: true,
-            sameSite: 'none',
-            domain: 'api.hypeignite.io',
-            maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000
+            secure: secureFlag,
+            domain: backendDomain,
+            sameSite: sameSiteFlag,
+            maxAge: tokens.expiry_date ? tokens.expiry_date - Date.now() : 3600 * 1000,
+            path: '/'
         };
         res.cookie('google_access_token', tokens.access_token, cookieOptions);
         if (tokens.refresh_token) {
