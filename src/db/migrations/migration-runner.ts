@@ -52,8 +52,87 @@ export class MigrationRunner {
    * Reads, sorts, and executes new migration files.
    * The entire process runs within a single transaction (BEGIN/COMMIT/ROLLBACK).
    */
+  /**
+   * Fixes the google_users table by recreating it with the correct schema
+   */
+  private async fixGoogleUsersTable() {
+    logger.info('Applying Google Users table fix...');
+    
+    const googleUsersFixSql = `
+      DROP TABLE IF EXISTS google_users;
+
+      CREATE TABLE google_users (
+        created_at TIMESTAMP,
+        username STRING,
+        email SYMBOL,
+        verified BOOLEAN,
+        updated_at TIMESTAMP,
+        twitter_addresses STRING,
+        google_id STRING,
+        name STRING,
+        picture STRING,
+        access_token STRING,
+        refresh_token STRING,
+        token_expiry TIMESTAMP,
+        last_login_at TIMESTAMP,
+        login_count LONG,
+        locale STRING,
+        hd STRING,
+        auth_provider STRING,
+        current_sign_in_ip STRING,
+        last_sign_in_ip STRING,
+        sign_in_count LONG,
+        tos_accepted_at TIMESTAMP,
+        email_verified BOOLEAN
+      ) TIMESTAMP(created_at) PARTITION BY DAY;
+    `;
+
+    try {
+      // Split and execute each statement
+      const statements = googleUsersFixSql
+        .split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith('--'));
+
+      for (const statement of statements) {
+        logger.debug(`Executing Google Users fix: ${statement.substring(0, 100)}...`);
+        await this.client.query(statement);
+      }
+
+      // Update existing rows with default values
+      const updateSql = `
+        UPDATE google_users
+        SET
+          login_count = COALESCE(login_count, 0),
+          sign_in_count = COALESCE(sign_in_count, 0),
+          auth_provider = COALESCE(auth_provider, 'google'),
+          email_verified = COALESCE(email_verified, false)
+        WHERE
+          login_count IS NULL
+          OR sign_in_count IS NULL
+          OR auth_provider IS NULL
+          OR email_verified IS NULL;
+      `;
+
+      await this.client.query(updateSql);
+      logger.info('✅ Google Users table fix applied successfully');
+      return true;
+    } catch (error) {
+      logger.error('❌ Failed to apply Google Users table fix:', error);
+      throw error;
+    }
+  }
+
   async runMigrations() {
     await this.init();
+    
+    // Apply Google Users table fix first
+    try {
+      await this.fixGoogleUsersTable();
+    } catch (error) {
+      logger.error('Error applying Google Users table fix, continuing with other migrations...', error);
+    }
+    
     // Get all migration files
     logger.info(`Looking for migration files in: ${MIGRATIONS_DIR}`);
     const allFiles = readdirSync(MIGRATIONS_DIR);
