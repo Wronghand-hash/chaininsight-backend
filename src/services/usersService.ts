@@ -48,7 +48,7 @@ export interface User {
 const googleClient = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
-    "http://localhost:3000/scanner/api/v1/kol/auth/google/callback"
+    "https://api.hypeignite.io/scanner/api/v1/kol/auth/google/callback"
 );
 /**
  * Generates the Google OAuth URL for sign-in.
