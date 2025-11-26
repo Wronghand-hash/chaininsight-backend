@@ -49,6 +49,24 @@ export class QuestDBService {
     })();
     return this.initPromise;
   }
+  private async addColumnIfNotExists(table: string, column: string, type: string): Promise<void> {
+    try {
+      const checkSql = `SELECT * FROM table_columns('${table}') WHERE column = '${column}'`;
+      const result = await this.pgClient.query(checkSql);
+      if (result.rows.length === 0) {
+        const addColumnSql = `ALTER TABLE ${table} ADD COLUMN ${column} ${type}`;
+        await this.pgClient.query(addColumnSql);
+        logger.info(`Successfully added ${column} column to ${table} table`);
+      } else {
+        if (config.questdb.diagnosticsVerbose) {
+          logger.debug(`Column ${column} already exists in ${table} table`);
+        }
+      }
+    } catch (error) {
+      logger.error(`Error handling ${column} column in ${table} table:`, error);
+      // Continue even if fails
+    }
+  }
   private async createTables(): Promise<void> {
     const wal = config.questdb.enableWal ? ' WAL' : '';
     // kol_trades (no unique index in QuestDB; enforce at app level)
@@ -148,6 +166,7 @@ export class QuestDBService {
           market_cap DOUBLE,
           fdv DOUBLE,
           volume_5m DOUBLE,
+          volume_1h DOUBLE,
           volume_24h DOUBLE,
           call_count INT,
           kol_calls_count INT,
@@ -213,50 +232,14 @@ export class QuestDBService {
       }
     ];
     try {
-      // Add updated_at column to user_posts_plans if it doesn't exist
-      try {
-        await this.pgClient.query(`
-          ALTER TABLE user_posts_plans
-          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP
-        `);
-        logger.info('Successfully added updated_at column to user_posts_plans table');
-      } catch (migrationError) {
-        logger.error('Error adding updated_at column to user_posts_plans table:', migrationError);
-        // Continue with table creation even if migration fails
-      }
-      // Add email column to payment_history if it doesn't exist
-      try {
-        await this.pgClient.query(`
-          ALTER TABLE payment_history
-          ADD COLUMN IF NOT EXISTS email STRING
-        `);
-        logger.info('Successfully added email column to payment_history table');
-      } catch (migrationError) {
-        logger.error('Error adding email column to payment_history table:', migrationError);
-        // Continue with table creation even if migration fails
-      }
-      // Add email column to userPurchase if it doesn't exist
-      try {
-        await this.pgClient.query(`
-          ALTER TABLE userPurchase
-          ADD COLUMN IF NOT EXISTS email STRING
-        `);
-        logger.info('Successfully added email column to userPurchase table');
-      } catch (migrationError) {
-        logger.error('Error adding email column to userPurchase table:', migrationError);
-        // Continue with table creation even if migration fails
-      }
-      // Add email column to user_posts_plans if it doesn't exist
-      try {
-        await this.pgClient.query(`
-          ALTER TABLE user_posts_plans
-          ADD COLUMN IF NOT EXISTS email STRING
-        `);
-        logger.info('Successfully added email column to user_posts_plans table');
-      } catch (migrationError) {
-        logger.error('Error adding email column to user_posts_plans table:', migrationError);
-        // Continue with table creation even if migration fails
-      }
+      // Safe migrations using check-then-add
+      await this.addColumnIfNotExists('user_posts_plans', 'updated_at', 'TIMESTAMP');
+      await this.addColumnIfNotExists('payment_history', 'email', 'STRING');
+      await this.addColumnIfNotExists('userPurchase', 'email', 'STRING');
+      await this.addColumnIfNotExists('user_posts_plans', 'email', 'STRING');
+      await this.addColumnIfNotExists('payment_history', 'token', 'STRING');
+      await this.addColumnIfNotExists('userPurchase', 'token', 'STRING');
+      await this.addColumnIfNotExists('token_metrics', 'volume_1h', 'DOUBLE');
       for (const table of tables) {
         try {
           logger.debug(`Creating table: ${table.name}`);
@@ -336,6 +319,7 @@ export class QuestDBService {
           const marketCap = row.market_cap != null ? Number(row.market_cap) : null;
           const fdv = row.fdv != null ? Number(row.fdv) : null;
           const volume5m = row.volume_5m != null ? Number(row.volume_5m) : null;
+          const volume1h = row.volume_1h != null ? Number(row.volume_1h) : null;
           const volume24h = row.volume_24h != null ? Number(row.volume_24h) : null;
           const title = row.title != null ? String(row.title) : '';
           const CTOStr = row.CTO != null ? String(row.CTO) : '';
@@ -371,6 +355,11 @@ export class QuestDBService {
             if (row.volume_5m != null) {
               setClause += `, volume_5m = $${paramIndex}`;
               params.push(volume5m);
+              paramIndex++;
+            }
+            if (row.volume_1h != null) {
+              setClause += `, volume_1h = $${paramIndex}`;
+              params.push(volume1h);
               paramIndex++;
             }
             if (row.volume_24h != null) {
@@ -423,11 +412,11 @@ export class QuestDBService {
             await this.pgClient.query(updateSql, params);
           } else {
             const insertSql = `INSERT INTO token_metrics (
-              timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_24h,
+              timestamp, contract, chain, price_usd, market_cap, fdv, volume_5m, volume_1h, volume_24h,
               call_count, kol_calls_count, mention_user_count, calls_data, community_data, narrative_data, title, updated_at, CTO
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);`;
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19);`;
             await this.pgClient.query(insertSql, [
-              ts, contract, chain, priceUsd, marketCap, fdv, volume5m, volume24h,
+              ts, contract, chain, priceUsd, marketCap, fdv, volume5m, volume1h, volume24h,
               callCount, kolCallsCount, mentionUserCount, callsData, communityData, narrativeData, title, nowIso, CTOStr
             ]);
           }
@@ -583,6 +572,7 @@ export class QuestDBService {
     let market_cap: number | null = null;
     let fdv: number | null = null;
     let volume_5m: number | null = null;
+    let volume_1h: number | null = null;
     let volume_24h: number | null = null;
     let cto: string | null = null;
     if (dexscreenerPayload) {
@@ -591,9 +581,10 @@ export class QuestDBService {
       market_cap = pair?.marketCap != null ? Number(pair.marketCap) : null;
       fdv = pair?.fdv != null ? Number(pair.fdv) : null;
       volume_5m = pair?.volume?.m5 != null ? Number(pair.volume.m5) : null;
+      volume_1h = pair?.volume?.h1 != null ? Number(pair.volume.h1) : null;
       volume_24h = pair?.volume?.h24 != null ? Number(pair.volume.h24) : null;
       cto = pair?.info ? JSON.stringify(pair.info) : null;
-      logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${price_usd} marketCap=${market_cap} fdv=${fdv} vol5m=${volume_5m} vol24h=${volume_24h}`);
+      logger.info(`[Dexscreener] metrics for ${contractAddress}: priceUsd=${price_usd} marketCap=${market_cap} fdv=${fdv} vol5m=${volume_5m} vol1h=${volume_1h} vol24h=${volume_24h}`);
     }
     const row: Record<string, any> = {
       timestamp: now,
@@ -607,6 +598,7 @@ export class QuestDBService {
       row.market_cap = market_cap;
       row.fdv = fdv;
       row.volume_5m = volume_5m;
+      row.volume_1h = volume_1h;
       row.volume_24h = volume_24h;
       row.CTO = cto;
     }
