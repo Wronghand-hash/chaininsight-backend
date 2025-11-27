@@ -78,12 +78,13 @@ export const handleTwitterCallback = async (req: Request, res: Response, next: N
         logger.debug('handleTwitterCallback: Using redirectUri for exchange:', redirectUri);
 
         const result = await twitterService.handleLoginCallback(code as string, codeVerifier, state as string, redirectUri);
-        logger.debug('handleTwitterCallback: Callback successful, username:', result.username);
+        logger.debug(`handleTwitterCallback: Callback successful, username: ${result.username}`);
 
         // Redirect to client dashboard with success
         // Note: We don't include the refresh token in the URL for security
-        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}&userId=${result.userId}`;
-        logger.debug('handleTwitterCallback: Redirecting to client URL:', clientUrl);
+        const profileImageParam = result.profileImageUrl ? `&profileImageUrl=${encodeURIComponent(result.profileImageUrl)}` : '';
+        const clientUrl = `${process.env.CLIENT_URL || 'https://xalerts.vercel.app'}/dashboard?success=true&username=${result.username}&userId=${result.userId}${profileImageParam}`;
+        console.log(`handleTwitterCallback: Redirecting to client URL: ${clientUrl}`);
         res.redirect(clientUrl);
     } catch (error: any) {
         logger.error('handleTwitterCallback: Error handling Twitter callback:', error);

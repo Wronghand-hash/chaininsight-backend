@@ -98,7 +98,7 @@ class TwitterService {
         return { url, state, codeVerifier, codeChallenge };
     }
 
-    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string; userId: string }> {
+    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string; userId: string; profileImageUrl?: string }> {
         logger.debug('handleLoginCallback: Received code length:', code.length, 'state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length, 'redirectUri:', redirectUri);
 
         // Get codeVerifier from Redis
@@ -185,6 +185,7 @@ class TwitterService {
                             refresh_token = ${refreshToken ? `'${refreshToken.replace(/'/g, "''")}'` : 'NULL'},
                             expires_at = '${expiresAt.toISOString()}',
                             scope = '${scopeStr.replace(/'/g, "''")}',
+                            profile_image_url = ${userData.profile_image_url ? `'${userData.profile_image_url.replace(/'/g, "''")}'` : 'NULL'},
                             updated_at = now()
                         WHERE id = '${userData.id}'
                     `);
@@ -198,7 +199,8 @@ class TwitterService {
                             access_token, 
                             refresh_token, 
                             expires_at, 
-                            scope, 
+                            scope,
+                            profile_image_url,
                             created_at, 
                             updated_at
                         ) VALUES (
@@ -209,6 +211,7 @@ class TwitterService {
                             ${refreshToken ? `'${refreshToken.replace(/'/g, "''")}'` : 'NULL'},
                             '${expiresAt.toISOString()}',
                             '${scopeStr.replace(/'/g, "''")}',
+                            ${userData.profile_image_url ? `'${userData.profile_image_url.replace(/'/g, "''")}'` : 'NULL'},
                             now(),
                             now()
                         )
@@ -227,7 +230,8 @@ class TwitterService {
                 expiresIn,
                 scope: scopeStr,
                 username: userData.username,
-                userId: userData.id
+                userId: userData.id,
+                profileImageUrl: userData.profile_image_url
             };
         } catch (err: any) {
             logger.error(`Failed to handle Twitter login callback: ${err.code || 'Unknown error'} - ${err.message}`, err);
