@@ -52,8 +52,19 @@ export class QuestDBService {
   private async addColumnIfNotExists(table: string, column: string, type: string): Promise<void> {
     try {
       const checkSql = `SELECT * FROM table_columns('${table}') WHERE column = '${column}'`;
+      logger.debug(`[QuestDB] Checking column existence`, { table, column, checkSql });
       const result = await this.pgClient.query(checkSql);
-      if (result.rows.length === 0) {
+      const exists = result.rows.length > 0;
+      const columnInfo = exists ? result.rows[0] : null;
+      logger.info(
+        `[QuestDB] Column check for ${table}.${column}`,
+        {
+          exists,
+          type: columnInfo?.type ?? null,
+          designated: columnInfo?.designated ?? null,
+        }
+      );
+      if (!exists) {
         const addColumnSql = `ALTER TABLE ${table} ADD COLUMN ${column} ${type}`;
         await this.pgClient.query(addColumnSql);
         logger.info(`Successfully added ${column} column to ${table} table`);
