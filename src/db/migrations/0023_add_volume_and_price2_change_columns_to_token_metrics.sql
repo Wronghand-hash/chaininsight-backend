@@ -1,1 +1,0 @@
-ALTER TABLE token_metrics ADD COLUMN volume_1h DOUBLE;
