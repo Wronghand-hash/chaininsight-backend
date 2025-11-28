@@ -250,6 +250,8 @@ export class QuestDBService {
       await this.addColumnIfNotExists('user_posts_plans', 'email', 'STRING');
       await this.addColumnIfNotExists('payment_history', 'token', 'STRING');
       await this.addColumnIfNotExists('userPurchase', 'token', 'STRING');
+      await this.addColumnIfNotExists('payment_history', 'twitter_community', 'STRING');
+      await this.addColumnIfNotExists('userPurchase', 'twitter_community', 'STRING');
       await this.addColumnIfNotExists('token_metrics', 'volume_1h', 'DOUBLE');
       await this.addColumnIfNotExists('twitter_auth', 'profile_image_url', 'STRING');
       for (const table of tables) {
