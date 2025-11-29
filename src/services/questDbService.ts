@@ -140,6 +140,21 @@ export class QuestDBService {
     // Other tables
     const tables = [
       {
+        name: 'twitter_auth',
+        create: `CREATE TABLE IF NOT EXISTS twitter_auth (
+          timestamp TIMESTAMP,
+          id STRING,
+          username STRING,
+          access_token STRING,
+          refresh_token STRING,
+          expires_at TIMESTAMP,
+          scope STRING,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          profile_image_url STRING
+        ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
+      },
+      {
         name: 'prices',
         create: `CREATE TABLE IF NOT EXISTS prices (
           timestamp TIMESTAMP,
@@ -253,7 +268,6 @@ export class QuestDBService {
       await this.addColumnIfNotExists('payment_history', 'twitter_community', 'STRING');
       await this.addColumnIfNotExists('userPurchase', 'twitter_community', 'STRING');
       await this.addColumnIfNotExists('token_metrics', 'volume_1h', 'DOUBLE');
-      await this.addColumnIfNotExists('twitter_auth', 'profile_image_url', 'STRING');
       for (const table of tables) {
         try {
           logger.debug(`Creating table: ${table.name}`);
