@@ -279,7 +279,30 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
             return res.status(401).json({ error: 'No access token provided' });
         }
         const user = await usersService.getCurrentUser(accessToken, refreshToken);
-        res.json(user);
+
+        // Ensure QuestDB is initialized before querying twitter_auth
+        await questdbService.init();
+
+        let twitterAuth: any[] = [];
+        if (user?.email) {
+            const safeEmail = user.email.replace(/'/g, "''");
+            const result = await questdbService.query(`SELECT * FROM twitter_auth WHERE email = '${safeEmail}' ORDER BY timestamp DESC;`);
+
+            if (result?.rows && result?.columns) {
+                twitterAuth = result.rows.map((row: any[]) => {
+                    const obj: any = {};
+                    result.columns.forEach((col: string, idx: number) => {
+                        obj[col] = row[idx];
+                    });
+                    return obj;
+                });
+            }
+        }
+
+        res.json({
+            user,
+            twitterAuth,
+        });
     } catch (error: any) {
         logger.error('Error in getCurrentUserProfile:', error);
         if (error.message === 'No email found in token') {
