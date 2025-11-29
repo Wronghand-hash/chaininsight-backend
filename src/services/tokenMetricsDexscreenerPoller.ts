@@ -23,7 +23,7 @@ class TokenMetricsDexscreenerPoller {
     this.running = true;
     // 5-minute alert job (runs every 6 minutes at :00, :06, :12, etc.)
     this.fiveMinJob = new CronJob(
-      '0 */1 * * * *',  // Every 6 minutes at :00 seconds
+      '0 */6 * * * *',  // Every 6 minutes at :00 seconds
       async () => {
         logger.info('[Scheduler] Starting 5-minute alert cycle');
         await this.fetchTokenDexInfo('5min');
