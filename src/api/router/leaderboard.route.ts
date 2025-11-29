@@ -5,7 +5,7 @@ import { kolTradeService } from '../services/kolsActivity.service';
 import { generateTwitterLoginUrl, handleTwitterCallback, handleTwitterLogout } from '../services/twitter.auth';
 import { generateWalletKeypair, getPaymentStatus } from '../controllers/payment.controller';
 import { freeTrialController } from '../controllers/freeTrial.controller';
-import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser, getCurrentUserProfile, getAllUsers } from '../controllers/user.controller';
+import { googleAuthCallback, googleAuthInit, verifyGoogleToken, logoutUser, getCurrentUserProfile, getAllUsers, getCurrentUserPaymentHistory } from '../controllers/user.controller';
 
 const kolsLeaderboardRouter = Router();
 /**
@@ -558,6 +558,9 @@ kolsLeaderboardRouter.post('/auth/google/verify', verifyGoogleToken);
 
 
 kolsLeaderboardRouter.get('/me', getCurrentUserProfile);
+
+// Current user's payment history (completed/transferred, grouped by recency)
+kolsLeaderboardRouter.get('/auth/payment-history', getCurrentUserPaymentHistory);
 
 
 // Assuming TopTokenResponse schema needs to be added to components/schemas in Swagger config

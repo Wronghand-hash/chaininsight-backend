@@ -223,7 +223,6 @@ export const verifyGoogleToken = async (req: Request, res: Response, next: NextF
             }
         });
     } catch (error) {
-        logger.error('Error verifying Google token:', error);
         next(error);
     }
 };
@@ -245,6 +244,11 @@ export const getCurrentUser = async (req: Request, res: Response, next: NextFunc
  * @returns {Promise<void>}
  */
 export const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
+    /**
+     * Get all users from google_users table
+     * @route GET /kol/users
+     * @returns {Promise<void>}
+     */
     try {
         // Initialize the QuestDB service if not already initialized
         await questdbService.init();
@@ -263,7 +267,6 @@ export const getAllUsers = async (req: Request, res: Response, next: NextFunctio
     }
 };
 
-// ... (rest of the code remains the same)
 /**
  * Get current user profile
  * @route GET /kol/profile
@@ -273,8 +276,8 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
     try {
         // Get the access token from cookies
         const accessToken = req.cookies?.google_access_token;
-        const refreshToken = req.cookies?.google_refresh_token
-        console.log(req.cookies, "cookies")
+        const refreshToken = req.cookies?.google_refresh_token;
+        console.log(req.cookies, "cookies");
         if (!accessToken) {
             return res.status(401).json({ error: 'No access token provided' });
         }
@@ -314,6 +317,116 @@ export const getCurrentUserProfile = async (req: Request, res: Response, next: N
         next(error);
     }
 };
+
+/**
+ * Get current user's payment history grouped by botHistory and currentBots
+ * - Uses Google auth cookies to resolve the current user
+ * - Fetches rows from payment_history by email
+ * - Only includes rows with status 'completed' or 'transferred'
+ * - Rows older than 1 day (based on timestamp) go to botHistory, others to currentBots
+ * @route GET /auth/payment-history
+ */
+export const getCurrentUserPaymentHistory = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const accessToken = req.cookies?.google_access_token;
+        const refreshToken = req.cookies?.google_refresh_token;
+
+        logger.debug('getCurrentUserPaymentHistory: Cookie tokens', {
+            hasAccessToken: !!accessToken,
+            hasRefreshToken: !!refreshToken,
+            accessTokenLength: accessToken?.length || 0,
+            refreshTokenLength: refreshToken?.length || 0,
+        });
+
+        if (!accessToken) {
+            logger.warn('getCurrentUserPaymentHistory: No access token provided in cookies');
+            return res.status(401).json({ error: "No access token provided" });
+        }
+
+        const user = await usersService.getCurrentUser(accessToken, refreshToken);
+
+        logger.debug('getCurrentUserPaymentHistory: Resolved current user', {
+            email: user?.email,
+            username: user?.username,
+        });
+
+        if (!user?.email) {
+            logger.error('getCurrentUserPaymentHistory: User email not found after getCurrentUser');
+            return res.status(400).json({ error: "User email not found" });
+        }
+
+        await questdbService.init();
+        logger.debug('getCurrentUserPaymentHistory: QuestDB initialized');
+
+        const safeEmail = user.email;
+        const sql = `
+            SELECT timestamp, twitterId, email, amount, serviceType, chain, wallet, address, publicKey, privateKey, paymentStatus, status, twitter_community, token
+            FROM payment_history
+            WHERE email = '${safeEmail}@gmail.com'
+              AND status IN ('completed', 'transferred')
+            ORDER BY timestamp DESC;
+        `;
+
+        logger.debug('getCurrentUserPaymentHistory: Executing payment_history query', {
+            email: user.email,
+        });
+
+        const result = await questdbService.query(sql);
+
+        logger.info('getCurrentUserPaymentHistory: Query result metadata', {
+            email: user.email,
+            rowCount: result.rows?.length || 0,
+            columns: result.columns,
+        });
+
+        const botHistory: any[] = [];
+        const currentBots: any[] = [];
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+
+        (result.rows || []).forEach((row: any[]) => {
+            const entry: any = {
+                timestamp: row[0],
+                twitterId: row[1],
+                email: row[2],
+                amount: row[3],
+                serviceType: row[4],
+                chain: row[5],
+                wallet: row[6],
+                address: row[7],
+                publicKey: row[8],
+                privateKey: row[9],
+                paymentStatus: row[10],
+                status: row[11],
+                twitter_community: row[12],
+                token: row[13]
+            };
+
+            const createdTime = new Date(entry.timestamp).getTime();
+            if (!isNaN(createdTime) && now - createdTime > oneDayMs) {
+                botHistory.push(entry);
+            } else {
+                currentBots.push(entry);
+            }
+        });
+
+        logger.info('getCurrentUserPaymentHistory: Grouping complete', {
+            email: user.email,
+            botHistoryCount: botHistory.length,
+            currentBotsCount: currentBots.length,
+        });
+
+        res.json({
+            botHistory,
+            currentBots
+        });
+    } catch (error) {
+        logger.error('Error in getCurrentUserPaymentHistory:', error);
+
+        next(error);
+    }
+};
+
 // Error handler for authentication
 export const handleAuthError = (error: Error, req: Request, res: Response, next: NextFunction) => {
     if (error.message === 'Invalid Google token') {
@@ -326,6 +439,7 @@ export const handleAuthError = (error: Error, req: Request, res: Response, next:
 };
 // Export all auth-related routes
 export const authRoutes = (router: any) => {
+
     // Google OAuth flow
     router.get('/auth/google', googleAuthInit);
     router.get('/auth/google/callback', googleAuthCallback);
@@ -333,4 +447,6 @@ export const authRoutes = (router: any) => {
     router.post('/auth/google/verify', verifyGoogleToken);
     // Get current user
     router.get('/auth/me', getCurrentUser);
+    // Get current user's payment history
+    router.get('/auth/payment-history', getCurrentUserPaymentHistory);
 };
