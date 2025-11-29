@@ -98,7 +98,7 @@ class TwitterService {
         return { url, state, codeVerifier, codeChallenge };
     }
 
-    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string; userId: string; profileImageUrl?: string }> {
+    async handleLoginCallback(code: string, codeVerifier: string, state: string, redirectUri: string, email?: string): Promise<{ accessToken: string; refreshToken?: string; expiresIn: number; scope: string; username?: string; userId: string; profileImageUrl?: string; email?: string }> {
         logger.debug('handleLoginCallback: Received code length:', code.length, 'state:', state.substring(0, 10) + '...', 'codeVerifier length:', codeVerifier.length, 'redirectUri:', redirectUri);
 
         // Get codeVerifier from Redis
@@ -169,6 +169,9 @@ class TwitterService {
             // Prepare the scope as a string
             const scopeStr = Array.isArray(scope) ? scope.join(' ') : scope;
 
+            const safeEmail = email ? email.replace(/'/g, "''") : null;
+            logger.debug('handleLoginCallback: Email resolution', { hasEmail: !!email, emailSample: email ? email.split('@')[0] + '@...' : null });
+
             try {
                 // First, check if user exists
                 const existingUser = await questdbService.query(`
@@ -186,9 +189,11 @@ class TwitterService {
                             expires_at = '${expiresAt.toISOString()}',
                             scope = '${scopeStr.replace(/'/g, "''")}',
                             profile_image_url = ${userData.profile_image_url ? `'${userData.profile_image_url.replace(/'/g, "''")}'` : 'NULL'},
+                            email = ${safeEmail ? `'${safeEmail}'` : 'NULL'},
                             updated_at = now()
                         WHERE id = '${userData.id}'
                     `);
+                    logger.debug('handleLoginCallback: Updated twitter_auth with email', { id: userData.id, hasEmail: !!safeEmail });
                 } else {
                     // Insert new record
                     await questdbService.query(`
@@ -201,6 +206,7 @@ class TwitterService {
                             expires_at, 
                             scope,
                             profile_image_url,
+                            email,
                             created_at, 
                             updated_at
                         ) VALUES (
@@ -212,10 +218,12 @@ class TwitterService {
                             '${expiresAt.toISOString()}',
                             '${scopeStr.replace(/'/g, "''")}',
                             ${userData.profile_image_url ? `'${userData.profile_image_url.replace(/'/g, "''")}'` : 'NULL'},
+                            ${safeEmail ? `'${safeEmail}'` : 'NULL'},
                             now(),
                             now()
                         )
                     `);
+                    logger.debug('handleLoginCallback: Inserted new twitter_auth row with email', { id: userData.id, hasEmail: !!safeEmail });
                 }
 
                 logger.debug(`Successfully stored/updated Twitter auth data for user: @${userData.username}`);
@@ -231,7 +239,8 @@ class TwitterService {
                 scope: scopeStr,
                 username: userData.username,
                 userId: userData.id,
-                profileImageUrl: userData.profile_image_url
+                profileImageUrl: userData.profile_image_url,
+                email: email
             };
         } catch (err: any) {
             logger.error(`Failed to handle Twitter login callback: ${err.code || 'Unknown error'} - ${err.message}`, err);

@@ -151,7 +151,8 @@ export class QuestDBService {
           scope STRING,
           created_at TIMESTAMP,
           updated_at TIMESTAMP,
-          profile_image_url STRING
+          profile_image_url STRING,
+          email STRING
         ) TIMESTAMP(timestamp) PARTITION BY DAY${wal};`
       },
       {
@@ -263,6 +264,7 @@ export class QuestDBService {
       await this.addColumnIfNotExists('payment_history', 'email', 'STRING');
       await this.addColumnIfNotExists('userPurchase', 'email', 'STRING');
       await this.addColumnIfNotExists('user_posts_plans', 'email', 'STRING');
+      await this.addColumnIfNotExists('twitter_auth', 'email', 'STRING');
       await this.addColumnIfNotExists('payment_history', 'token', 'STRING');
       await this.addColumnIfNotExists('userPurchase', 'token', 'STRING');
       await this.addColumnIfNotExists('payment_history', 'twitter_community', 'STRING');
