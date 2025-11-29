@@ -5,7 +5,7 @@ import { usersService } from '../../services/usersService';
 import { logger } from '../../utils/logger'; // Assuming logger is available; adjust path if needed
 
 // CRITICAL: Define the required, registered HTTPS ngrok URI once for consistency
-const NGROK_REDIRECT_URI = 'https://tiesha-postrorse-blindfoldedly.ngrok-free.dev/scanner/api/v1/kol/auth/twitter/callback';
+const NGROK_REDIRECT_URI = 'https://api.hypeignite.io/scanner/api/v1/kol/auth/twitter/callback';
 
 // 1. Get nonce/auth URL (init for nonce flow)
 export const generateTwitterLoginUrl = async (req: Request, res: Response): Promise<void> => {
