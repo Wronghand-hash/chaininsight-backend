@@ -22,16 +22,16 @@ class TokenMetricsDexscreenerPoller {
     await questdbService.init();
     this.running = true;
     // 5-minute alert job (runs every 6 minutes at :00, :06, :12, etc.)
-    this.fiveMinJob = new CronJob(
-      '0 */6 * * * *',  // Every 6 minutes at :00 seconds
-      async () => {
-        logger.info('[Scheduler] Starting 5-minute alert cycle');
-        await this.fetchTokenDexInfo('5min');
-      },
-      null,
-      true,
-      'UTC'
-    );
+    // this.fiveMinJob = new CronJob(
+    //   '0 */6 * * * *',  // Every 6 minutes at :00 seconds
+    //   async () => {
+    //     logger.info('[Scheduler] Starting 5-minute alert cycle');
+    //     await this.fetchTokenDexInfo('5min');
+    //   },
+    //   null,
+    //   true,
+    //   'UTC'
+    // );
     // 1-hour volume alert job (runs at :00 every hour)
     this.oneHourJob = new CronJob(
       '0 0 * * * *',  // At :00 of every hour
