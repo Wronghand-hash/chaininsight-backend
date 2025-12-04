@@ -51,7 +51,7 @@
     "jsonwebtoken": "^9.0.2",
     "kafkajs": "^2.2.4",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1",
+    "swagger-ui-express": "^4.6.0",
     "twitter-api-v2": "^1.27.0",
     "winston": "^3.18.3"
   }
