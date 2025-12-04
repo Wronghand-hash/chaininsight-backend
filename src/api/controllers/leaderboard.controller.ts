@@ -4,10 +4,7 @@ import { logger } from '../../utils/logger';
 // Initialize the service instance
 const kolService = new KolService();
 
-/**
- * Handles GET requests to fetch the KOL leaderboards for a specific contract.
- * Expects 'contractAddress' and optionally 'chain' in the query parameters.
- */
+
 export const getKolLeaderboards = async (req: Request, res: Response): Promise<void> => {
     const { contractAddress, chain } = req.query;
 
